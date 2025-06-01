@@ -1,2 +1,2 @@
-#i/bin/bash
+#!/bin/bash
 ./vsasm -oexe prog1.s -o main.exe
