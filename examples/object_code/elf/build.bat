@@ -1,0 +1,1 @@
+vsasm -fmt elf triangle.s

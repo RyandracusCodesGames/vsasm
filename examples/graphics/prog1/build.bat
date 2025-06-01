@@ -1,0 +1,1 @@
+vsasm -oexe main.s

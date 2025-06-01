@@ -1,0 +1,1 @@
+vsasm -fmt psyq triangle.s

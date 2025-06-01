@@ -1,0 +1,1 @@
+vsasm -oexe prog1.s -o main.exe
