@@ -3,7 +3,7 @@ An assembler for the MIPS I and II instruction set architectures capable of asse
 
 ## About
 vsasm is a custom MIPS assembler that fully implements the MIPS I and II ISA's with a primary focus on bare metal homebrew and reverse engineering development 
-for the original Sony PlayStation and PlayStation Portable, but vsasm is capable of assembling source code for any 32-bit little endian MIPS processor.
+for the original Sony PlayStation and PlayStation Portable, but vsasm is capable of assembling source code for any 32-bit little-endian MIPS processor.
 
 ## Features
 * Outputs ELF(Executable and Linkable Format) binary object files compatible with the Mipsel GCC toolchain, allowing direct linkage with C/C++ code in modern PSX/PSP development.
@@ -17,13 +17,15 @@ for the original Sony PlayStation and PlayStation Portable, but vsasm is capable
 
 ## Bare-Metal PSX Programs Assembled Using VSASM
 
+https://github.com/user-attachments/assets/9e8de95f-223e-4b10-8ad3-25d5a82a7519
+
 ## Syntax
 As mentioned previously in the features section, vsasm supports two distinct syntaxes, that being the standard MIPS GNU syntax and PsyQ's ASMPSX assembler's syntax. 
 
 #### Comments
 GNU's `#` pound symbol and the classic `;` semi-colon comment styles are both supported by the assembler.
 #### Registers
-In GNU's syntax, every register is preceeded by a `$` symbol irrespective of the instruction while in ASMPSX's syntax, the `$` symbol indicates a hexadecimal immediate value and ***NOT*** a register.
+In GNU's syntax, every register is preceded by a `$` symbol irrespective of the instruction, while in ASMPSX's syntax, the `$` symbol indicates a hexadecimal immediate value and ***NOT*** a register.
 
 GNU                 | ASMPSX       | 
 --------------------| -------------| 
@@ -116,11 +118,11 @@ xor reg1, reg2               | xor reg1, reg1, reg2
 ```c
 vsasm example.s
 ```
-* Output text section of program to a file
+* Output the text section of the program to a file
 ```c
 vsasm -text example.s
 ```
-* Print symbol table to the console
+* Print the symbol table to the console
 ```c
 vsasm -sym example.s
 ```
@@ -138,16 +140,16 @@ vsasm -fmt gnu example.s -o gnu.o
 vsasm -fmt psyq example.s -o psyq.o
 ```
 ## Error Handling
-vsasm produces a rich set of error messages and warnings for various syntax and semantic errors that prints 
-the line number of the error, the error message, and the original line that caused the error such as 
+vsasm produces a rich set of error messages and warnings for various syntax and semantic errors that are printed 
+the line number of the error, the error message, and the original line that caused the error, such as 
 
 ```c 
 	Syntax Error: Invalid hexadecimal number for immediate value
 	Line 5: addi $t0, $t2, 0x1FFuy
 ```
 
-In the case that you include other assembler files to the main source file that contains an error, the error handler 
-will even print out what line in the included file caused an error such as 
+In the case that you include other assembler files in the main source file that contains an error, the error handler 
+will even print out what line in the included file caused an error, such as 
 
 ```c 
 	Syntax Error: Invalid hexadecimal number for immediate value
@@ -156,11 +158,14 @@ will even print out what line in the included file caused an error such as
 ```
 
 Errors cause the program to abort and will not produce any object code or executables. Warnings will ***CONTINUE*** 
-program flow such as unaligned memory access's from load or store instructions so be wary of warning messages as well
-since code that could potientially crash a system or cause other unforseen bugs can be passed through and assembled.
+program flow such as unaligned memory accesses from load or store instructions, so be wary of warning messages as well
+since code that could potentially crash a system or cause other unforeseen bugs can be passed through and assembled.
 
 ```c 
 	Warning: Unaligned memory access
 	Line 5: lw $t0, 5($a0)
 ```
 ## Linking VSASM Object Code with a modern GCC toolchain and the legacy PsyQ toolchain
+
+https://github.com/user-attachments/assets/0b843edf-4d13-41a3-aa5a-3afde9ff0f83
+
