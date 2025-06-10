@@ -8,8 +8,8 @@
 *
 *   File: vs_symtable.h
 *   Date: 4/23/2025
-*   Version: 1.0
-*   Updated: 6/1/2025
+*   Version: 1.1
+*   Updated: 6/9/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
@@ -20,6 +20,7 @@ typedef enum VS_SYM_TYPE{
 	VS_SYM_OBJ  = 0x1,
 	VS_SYM_FUNC = 0x2,
 	VS_SYM_SECT = 0x3,
+	VS_SYM_UND = 0x0,
 }VS_SYM_TYPE;
 
 typedef enum VS_SYM_SCOPE{
@@ -57,6 +58,7 @@ VS_SYM VS_GetSymbolFromIndex(unsigned long index);
 unsigned long VS_GetSymbolTableSize();
 void VS_ExpandAddrForAllDataSymbols(int expand);
 unsigned long VS_GetSymbolAddr(unsigned long index);
+int VS_LineContainsSymbol(char* line);
 void VS_PrintSymbolTable();
 void VS_DestroySymbolTable();
 

@@ -11,8 +11,8 @@
 *
 *   File: vs_utils.c
 *   Date: 5/21/2025
-*   Version: 1.0
-*   Updated: 6/1/2025
+*   Version: 1.1
+*   Updated: 6/10/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
@@ -44,6 +44,7 @@ unsigned long VS_AddIncludeEntry(char* name, unsigned long line_start, unsigned 
 		
 		table.table[size].line_start = line_start;
 		table.table[size].line_end = line_end;
+		table.table[size].num_of_lines = line_end - line_start;
 		
 		table.size++;
 		
@@ -57,6 +58,7 @@ void VS_UpdateIncludeEntry(unsigned long index, unsigned long line_start, unsign
 	if(index < VS_MAX_INCLUDES){
 		table.table[index].line_start = line_start;
 		table.table[index].line_end = line_end;
+		table.table[index].num_of_lines = line_end - line_start;
 	}
 }
 
@@ -71,6 +73,18 @@ int VS_ErrorOccuredInIncludeEntry(unsigned long line_count){
 	return -1;
 }
 
+int VS_GetActualLineCount(unsigned long line_count){
+	unsigned long i, size = table.size;
+	int count = line_count;
+	for(i = 0; i < size; i++){
+		if(line_count > table.table[i].line_end){
+			count -= table.table[i].num_of_lines;
+		}
+	}
+	
+	return count;
+}
+
 void VS_PrintErrorFromIncludeEntry(unsigned long entry, unsigned long line_count){
 	int count;
 	char line[VS_MAX_LINE+1];
@@ -79,7 +93,7 @@ void VS_PrintErrorFromIncludeEntry(unsigned long entry, unsigned long line_count
 		FILE* err = fopen(table.table[entry].name,"rb");
 		
 		count = line_count - table.table[entry].line_start;
-		
+
 		if(count < 0){
 			count = 0;
 		}
@@ -116,7 +130,7 @@ void VS_PrintError(FILE* in, char* line, unsigned long line_count){
 	printf("Line %ld: %s\n",line_count,line);
 }
 
-int VS_GrabMacrosFromIncludeEntry(char* incdir, unsigned long incindex, unsigned long line_count, VS_ASM_PARAMS* params){
+int VS_GrabMacrosFromIncludeEntry(char* incdir, unsigned long incindex, unsigned long line_count){
 	FILE* inc;
 	char dest[VS_MAX_LINE+1];
 	char trim[VS_MAX_LINE+1];
@@ -190,22 +204,71 @@ int VS_GrabMacrosFromIncludeEntry(char* incdir, unsigned long incindex, unsigned
 
 				VS_AddMacro(name,value);
 			}	
-			
-			token = strstr(trim,"set");
-			
-			if(token != NULL && VS_LineContainsInstruction(trim,params) == -1 && strstr(trim,":") == NULL && VS_LineContainsDirective(trim) == -1){
-				char* value = token + strlen("set");
-				memset(name,'\0',VS_MAX_LINE);
-				memcpy(name,trim,(int)(token - trim));
-
-				VS_AddSetMacro(name,value);
-			}	
 		}
 		
 		fclose(inc);
 	}
 	
 	return 0;
+}
+
+int VS_VerifyPathSyntax(char* path, char* directive, unsigned long line_count){
+	char* end_quotes;
+	
+	if(path[0] != '\'' && path[0] != '\"'){
+		printf("Syntax Error: The file path of an %s directive must be encased in double quotes or single quotes\n",directive);
+		
+		int err = VS_ErrorOccuredInIncludeEntry(line_count);
+		
+		if(err != -1){
+			VS_PrintErrorFromIncludeEntry(err,line_count);
+		}
+		else{
+			printf("Line %ld: %s\n",line_count,path);
+		}
+		
+		return 0;
+	}
+	else{
+		if(path[0] == '\"'){
+			end_quotes = strstr(path + 1,"\"");
+			
+			if(end_quotes == NULL){
+				printf("Syntax Error: The file path of an %s directive must be encased in double quotes or single quotes\n",directive);
+				
+				int err = VS_ErrorOccuredInIncludeEntry(line_count);
+		
+				if(err != -1){
+					VS_PrintErrorFromIncludeEntry(err,line_count);
+				}
+				else{
+					printf("Line %ld: %s\n",line_count,path);
+				}
+				
+				return 0;
+			}
+		}
+		else{
+			end_quotes = strstr(path + 1,"\'");
+			
+			if(end_quotes == NULL){
+				printf("Syntax Error: The file path of an %s directive must be encased in double quotes or single quotes\n",directive);
+				
+				int err = VS_ErrorOccuredInIncludeEntry(line_count);
+		
+				if(err != -1){
+					VS_PrintErrorFromIncludeEntry(err,line_count);
+				}
+				else{
+					printf("Line %ld: %s\n",line_count,path);
+				}
+
+				return 0;
+			}
+		}
+	}
+
+	return 1;
 }
 
 unsigned long VS_CountNumberOfCharInLine(char* line, char c){
@@ -480,10 +543,17 @@ unsigned char VS_GetVFPUComparison(char* cond){
 	else return 16;
 }
 
-void VS_UnderlineLine(char* line){
+void VS_LowercaseLine(char* line){
 	int i, len = strlen(line);
 	for(i = 0; i < len; i++){
 		line[i] = tolower(line[i]);
+	}
+}
+
+void VS_LowercaseAndCopyLine(char* dest, char* src, int n){
+	int i;
+	for(i = 0; i < n; i++){
+		dest[i] = tolower(src[i]);
 	}
 }
 
@@ -806,7 +876,10 @@ void VS_PrintErrorString(int error){
 			printf("Error: Bad syntax\n");
 		}break;
 		case -1:{
-			printf("Syntax Error: The operand of an instruction must begin with a $ symbol\n");
+			printf("Syntax Error: The operand of an instruction must begin with a $ symbol in GNU syntax\n");
+		}break;
+		case -16:{
+			printf("Syntax Error: The operand of an instruction must not begin with a $ in ASMPSX syntax\n");
 		}break;
 		case -2:{
 			printf("Syntax Error: Invalid register name\n");
@@ -844,6 +917,9 @@ void VS_PrintErrorString(int error){
 		case -15:{
 			printf("Syntax Error: Invalid PSP VFPU comparison condition name\n");
 		}break;
+		case -17:{
+			printf("Syntax Error: Invalid expression\n");
+		}break;
 		case 3:{
 			printf("Warning: Unaligned memory access\n");
 		}break;
@@ -852,4 +928,31 @@ void VS_PrintErrorString(int error){
 		}break;
 		default: printf("Unrecognized error code");
 	}
+}
+
+void VS_WriteInstruction(FILE* file, unsigned long instruction, VS_ENDIAN endian){
+	unsigned char msb1, msb2, lsb1, lsb2;
+	
+	msb1 = (instruction >> 24) & 0xff;
+	msb2 = (instruction >> 16) & 0xff;
+	lsb1 = (instruction >> 8) & 0xff;
+	lsb2 = instruction & 0xff;
+	
+	if(endian == VS_LITTLE_ENDIAN){
+		fwrite(&lsb2,1,1,file);
+		fwrite(&lsb1,1,1,file);
+		fwrite(&msb2,1,1,file);
+		fwrite(&msb1,1,1,file);
+	}
+	else{
+		fwrite(&msb1,1,1,file);
+		fwrite(&msb2,1,1,file);
+		fwrite(&lsb1,1,1,file);
+		fwrite(&lsb2,1,1,file);
+	}
+}
+
+void VS_WriteNop(FILE* file){
+	unsigned long zero = 0;
+	fwrite(&zero,4,1,file);
 }

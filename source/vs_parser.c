@@ -7,6 +7,7 @@
 #include <vs_utils.h>
 #include <vs_elf.h>
 #include <vs_psyqobj.h>
+#include <vs_exp_parser.h>
 
 /********************************************
 *   VideoStation Assembler
@@ -15,16 +16,13 @@
 *
 *   File: vs_parser.c
 *   Date: 4/29/2025
-*   Version: 1.0
-*   Updated: 6/1/2025
+*   Version: 1.1
+*   Updated: 6/10/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
 
-unsigned long org;
-
 int sym_index, symbol_index, label_instruction_count, instruction_count, safe_load_delay, OEXE;
-int syntax;
 
 VS_REGISTER vs_cop_registers[32] = {
 	{"$0", 0},
@@ -97,9 +95,13 @@ VS_REGISTER vs_asmpsx_cop_registers[32] = {
 };
 
 unsigned char VS_HexDFA(char* line){
+	if(line[0] == '0' && line[1] == 'x'){
+		line += 2;
+	}
+	
 	int i, len = strlen(line);
 	for(i = 0; i < len; i++){
-		if(line[i] != '\n' && !isxdigit(line[i]) && line[i] != 'x'){
+		if(line[i] != '\n' && !isxdigit(line[i])){
 			return 0;
 		}
 	}
@@ -132,7 +134,7 @@ unsigned char VS_FloatDFA(char* line){
 	return 1;
 }
 
-int VS_GetRegister(char* line, unsigned long* size_out){
+int VS_GetRegister(char* line, unsigned long* size_out, VS_ASM_PARAMS* params){
 	int i;
 	unsigned long size = 0;
 	char reg_str[8];
@@ -148,13 +150,13 @@ int VS_GetRegister(char* line, unsigned long* size_out){
 	*size_out = size;
 	reg_str[size] = '\0';
 	
-	if(!VS_IsValidRegister(reg_str,syntax)){
+	if(!VS_IsValidRegister(reg_str,params->syntax)){
 		return -2;
 	}
 	else return VS_GetRegisterNumber(reg_str);
 }
 
-int VS_GetFpRegister(char* line, unsigned long* size_out){
+int VS_GetFpRegister(char* line, unsigned long* size_out, VS_ASM_PARAMS* params){
 	int i;
 	unsigned long size = 0;
 	char reg_str[7];
@@ -170,8 +172,8 @@ int VS_GetFpRegister(char* line, unsigned long* size_out){
 	*size_out = size;
 	reg_str[size] = '\0';
 	
-	if(!VS_IsValidFpRegister(reg_str,syntax)){
-		if(!VS_IsValidRegister(reg_str,syntax)){
+	if(!VS_IsValidFpRegister(reg_str,params->syntax)){
+		if(!VS_IsValidRegister(reg_str,params->syntax)){
 			return -1;
 		}
 		else return -2;
@@ -304,14 +306,24 @@ void VS_CopyLabelName(char* dest, char* src, int offset){
 	}
 }
 
-int VS_IsValidImmediate(char* line){
+int VS_IsValidImmediate(char* line, VS_ASM_PARAMS* params){
 	int is_valid_hex, is_valid_int;
 	
 	if(line[0] == '-'){
 		line++;
 	}
 	
-	if(line[0] == '0' && line[1] == 'x'){
+	if(params->syntax == VS_ASMPSX_SYNTAX && line[0] == '$'){
+		line++;
+		
+		is_valid_hex = VS_HexDFA(line);
+		
+		if(is_valid_hex){
+			return 1;
+		}
+		else return -1;
+	}
+	else if(line[0] == '0' && line[1] == 'x'){
 		is_valid_hex = VS_HexDFA(line);
 		
 		if(is_valid_hex){
@@ -329,139 +341,257 @@ int VS_IsValidImmediate(char* line){
 	}
 }
 
-int VS_ParseRType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* file){
-	VS_R_TYPE rtype;
+int VS_IsValidReinterpretableRType(const char* name){
+	 return (!strcmp(name,"add") || !strcmp(name,"addu") || !strcmp(name,"and") || !strcmp(name,"sub") || !strcmp(name,"subu") 
+			|| !strcmp(name,"or") || !strcmp(name,"xor") || !strcmp(name,"nor") || !strcmp(name,"slt") || !strcmp(name,"sltu"));
+}
+
+int VS_IsValidRegImmType(const char* name){
+	return (!strcmp(name,"bgezal") || !strcmp(name,"bltzal") || !strcmp(name,"bgezall") || !strcmp(name,"bltzall") || !strcmp(name,"bgezl")
+			|| !strcmp(name,"bltzl"));
+}
+
+int VS_IsValidBranchOnZeroType(const char* name){
+	return (!strcmp(name,"bgtz") || !strcmp(name,"blez") || !strcmp(name,"bltz") || !strcmp(name,"beqz") ||  !strcmp(name,"beqz") || !strcmp(name,"bnez")
+			|| !strcmp(name,"bgez") || !strcmp(name,"bgtzl") || !strcmp(name,"blezl") || !strcmp(name,"beqzl") || !strcmp(name,"bnezl"));
+}
+
+int VS_IsValidSymbolAddrOperator(char c){
+	return (c == '>' || c == '<');
+}
+
+int VS_ParseImmediateValue(char* immediate, VS_ASM_PARAMS* params){
+	int imm, neg;
+	char imm_str[256];
+	
+	neg = 0;
+	
+	if(immediate[0] == '-'){
+		neg = 1;
+	}
+	
+	if(neg){
+		if(params->syntax == VS_ASMPSX_SYNTAX && immediate[1] == '$'){
+			memset(imm_str,'\0',256);
+			imm_str[0] = '-'; imm_str[1] = '0'; imm_str[2] = 'x';
+			imm = (signed int)strtol(strcat(imm_str,immediate+2), NULL, 0);
+		}
+		else{
+			imm = (signed int)strtol(immediate, NULL, 0);
+		}
+	}
+	else{
+		if(params->syntax == VS_ASMPSX_SYNTAX && immediate[0] == '$'){
+			memset(imm_str,'\0',256);
+			imm_str[0] = '0'; imm_str[1] = 'x';
+			imm = (unsigned long)strtoul(strcat(imm_str,immediate+1), NULL, 0);
+		}
+		else{
+			imm = (unsigned long)strtoul(immediate, NULL, 0);
+		}
+	}
+	
+	return imm;
+}
+
+int VS_IsValidRegisterPrefix(char* line, int len, VS_SYNTAX syntax){
+	if(line[len] != '$' && syntax == VS_GNU_SYNTAX){
+		return -1;
+	}
+	
+	if(line[len] == '$' && syntax == VS_ASMPSX_SYNTAX){
+		return -16;
+	}
+	
+	return 1;
+}
+
+int VS_WriteLoadDelay(FILE* file, unsigned long* instruction, VS_ENDIAN endian){
+	if(safe_load_delay){
+		VS_WriteInstruction(file,*instruction,endian);
+		VS_WriteNop(file);
+		instruction_count++;
+		return 2;
+	}
+	
+	return 1;
+}
+
+int VS_ReinterpretRTypeAsIType(FILE* file, const char* name, int rd, int rt, char* operands, unsigned long* instruction, VS_ASM_PARAMS* params){
 	VS_OPCODE opcode;
-	unsigned long size1, size2, size3, encode;
-	int len, imm, is_valid_imm, neg;
+	int neg, imm, is_valid_imm, expr;
+	char line[VS_MAX_LINE];
+	
+	VS_InitExprParser();
+	
+	neg = 0;
+	
+	if(VS_StrictIsStringBlank(operands)){
+		return 0;
+	}
+	
+	if(operands[0] == '-'){
+		neg = 1;
+	}
+	
+	if(VS_LineContainsOperator(operands+neg)){		
+		expr = VS_IsValidExpression(operands, params->syntax);
+		
+		if(!expr){
+			return -17;
+		}
+		
+		expr = VS_EvaluateExpr(operands, params->syntax);
+		sprintf(operands,"%d",expr);
+		is_valid_imm = VS_IsValidImmediate(operands, params);
+	}
+	else{
+		is_valid_imm = VS_IsValidImmediate(operands, params);
+	}
+
+	if(is_valid_imm == -1){
+		return -5;
+	}
+	else if(is_valid_imm == -2){
+	   return -6;	
+	}
+	
+	imm = VS_ParseImmediateValue(operands, params);
+	
+	if(neg){
+		if(imm <= -32768 || imm >= 32768){
+			return -7;
+		}
+	}
+	else{
+		if(imm >= 65536){
+			return -7;
+		}
+	}
+	
+	if(!strcmp(name,"addu")){
+		VS_GetOpcodeFromIndex(&opcode,VS_GetOpcode("addiu"));
+		*instruction = VS_Bin2Decimal(opcode.opcode) << 26 | rd << 21 | rt << 16 | (imm & 0xFFFF);
+	}
+	else{
+		char itype_instruction[VS_MAX_LINE];
+		
+		if(params->syntax == VS_GNU_SYNTAX){
+			strcpy(itype_instruction,name);
+			strcat(itype_instruction,"i");
+			VS_GetOpcodeFromIndex(&opcode,VS_GetOpcode(itype_instruction));
+			sprintf(line,"%s$%d,$%d,%d",opcode.name,rd,rt,imm & 0xFFFF);
+			return VS_ParseIType(opcode,instruction,line,file,params);
+		}
+		else{
+			strcpy(itype_instruction,name);
+			strcat(itype_instruction,"i");
+			VS_GetOpcodeFromIndex(&opcode,VS_GetOpcode(itype_instruction));
+			sprintf(line,"%sr%d,r%d,%d",opcode.name,rd,rt,imm & 0xFFFF);
+			return VS_ParseIType(opcode,instruction,line,file,params);
+		}
+	}
+		
+	return 1;
+}
+
+int VS_ReinterpretITypeAsRType(FILE* file, const char* name, int rt, int rs, int imm, unsigned long* instruction, VS_ASM_PARAMS* params){
+	VS_OPCODE opcode;
+	unsigned long instr;
+	unsigned char len;
+	char itype_instruction[10];
+	char line[VS_MAX_LINE];
+	
+	len = strlen(name);
+	
+	instr = 15 << 26 | 1 << 16 | ((imm >> 16) & 0xFFFF); /* lui */
+	VS_WriteInstruction(file,instr,params->endian);
+	instr = 13 << 26 | 1 << 21 | 1 << 16 | (imm & 0xFFFF); /* ori */
+	VS_WriteInstruction(file,instr,params->endian);
+	memset(itype_instruction,'\0',10);
+	
+	unsigned long i, count;
+	for(i = 0, count = 0; i < len; i++){
+		if(name[i] != 'i'){
+			itype_instruction[count++] = name[i];
+		}
+	}
+
+	if(params->syntax == VS_GNU_SYNTAX){
+		VS_GetOpcodeFromIndex(&opcode,VS_GetOpcode(itype_instruction));
+		sprintf(line,"%s$%d,$%d,$%d",opcode.name,rt,rs,1);
+		VS_ParseRType(opcode,instruction,line,file,params);
+	}
+	else{
+		VS_GetOpcodeFromIndex(&opcode,VS_GetOpcode(itype_instruction));
+		sprintf(line,"%sr%d,r%d,r%d",opcode.name,rt,rs,1);
+		VS_ParseRType(opcode,instruction,line,file,params);
+	}
+		
+	instruction_count += 2;
+	
+	return 1;
+}
+
+int VS_ParseRType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* file, VS_ASM_PARAMS* params){
+	VS_R_TYPE rtype;
+	unsigned long size1, size2, size3;
+	int len, is_valid_prefix, num_commas;
+	
+	VS_InitExprParser();
 	
 	memset(&rtype,0x0,sizeof(VS_R_TYPE));
 	
 	len = strlen(op.name);
-	neg = 0;
 	
 	if(!strcmp(op.name,"syscall") || !strcmp(op.name,"break")){
 		*instruction = VS_Bin2Decimal(op.opcode);
 		return 1;
 	}
 	
-	if(line[len] != '$' && syntax == VS_GNU_SYNTAX){
-		return -1;
+	is_valid_prefix = VS_IsValidRegisterPrefix(line,len,params->syntax);
+	
+	if(is_valid_prefix != 1){
+		return is_valid_prefix;
 	}
 
 	rtype.op = VS_Bin2Decimal(op.opcode);
-	rtype.rd = VS_GetRegister(line + len, &size1);
+	rtype.rd = VS_GetRegister(line + len, &size1, params);
 
 	if(rtype.rd == -1){
 		return -2;
 	}
 	
+	num_commas = VS_GetNumberOfCommas(line);
+	
 	if(rtype.rd == -2){
-		if(VS_GetNumberOfCommas(line) == 0){
+		if(num_commas == 0){
 			return 0;
 		}
 		else return -9;
 	}
 
-	if(!strcmp(op.name,"jr")){
+	if(!strcmp(op.name,"jr") || !strcmp(op.name,"jalr")){
 		*instruction = rtype.rd << 21 | rtype.op;
-			
-		if(safe_load_delay){
-			encode = rtype.rd << 21 | rtype.op;
-			fwrite(&encode,4,1,file);
-			encode = 0;
-			fwrite(&encode,4,1,file);
-			instruction_count++;
-			return 2;
+		
+		if(!strcmp(op.name,"jalr")){
+			*instruction |= 31 << 11;
 		}
 		
-		return 1;
+		return VS_WriteLoadDelay(file,instruction,params->endian);
 	}
-	else if(!strcmp(op.name,"jalr")){
-		*instruction = rtype.rd << 21 | 31 << 11 | rtype.op;
-		
-		if(safe_load_delay){
-			encode = rtype.rd << 21 | 31 << 11 | rtype.op;
-			fwrite(&encode,4,1,file);
-			encode = 0;
-			fwrite(&encode,4,1,file);
-			instruction_count++;
-			return 2;
-		}
-		
-		return 1;
-	}
-	else if(!strcmp(op.name,"neg")){
+	else if(!strcmp(op.name,"neg") && num_commas == 1){
 		*instruction = VS_GetRegisterNumber("$0") << 21 | rtype.rd << 16 | rtype.rd << 11 | rtype.op;
 		return 1;
 	}
 	
-	rtype.rs = VS_GetRegister(line + len + size1 + 1, &size2);
+	rtype.rs = VS_GetRegister(line + len + size1 + 1, &size2, params);
 	
-	if(line[len + size1 + 1] != '$' && rtype.rs < 0){
-		
-		int num_commas = VS_GetNumberOfCommas(line);
+	if(rtype.rs < 0){
 		if(num_commas >= 1 && (!strcmp(op.name,"add") || !strcmp(op.name,"addu") || !strcmp(op.name,"and") || !strcmp(op.name,"sub") || !strcmp(op.name,"subu") 
 			|| !strcmp(op.name,"or") || !strcmp(op.name,"xor"))){
-				
 			char* operands = line + len + size1 + 1;
-			
-			if(VS_StrictIsStringBlank(operands)){
-				return 0;
-			}
-			
-			if(line[len + size1 + 1] == '-'){
-				neg = 1;
-			}
-			
-			is_valid_imm = VS_IsValidImmediate(line + len + size1 + 1);
-		
-			if(is_valid_imm == -1){
-				return -5;
-			}
-			else if(is_valid_imm == -2){
-			   return -6;	
-			}
-			
-			if(neg){
-				imm = (signed int)strtol(line + len + size1 + 1, NULL, 0);
-				
-				if(imm <= -32768 || imm >= 32768){
-					return -7;
-				}
-			}
-			else{
-				imm = (unsigned int)strtoul(line + len + size1 + 1, NULL, 0);
-				
-				if(imm >= 65536){
-					return -7;
-				}
-			}
-			
-			if(!strcmp(op.name,"addu")){
-				VS_GetOpcodeFromIndex(&opcode,VS_GetOpcode("addiu"));
-				*instruction = VS_Bin2Decimal(opcode.opcode) << 26 | rtype.rd << 21 | rtype.rd << 16 | (imm & 0xFFFF);
-			}
-			else{
-				char itype_instruction[VS_MAX_LINE];
-				
-				if(syntax == VS_GNU_SYNTAX){
-					strcpy(itype_instruction,op.name);
-					strcat(itype_instruction,"i");
-					VS_GetOpcodeFromIndex(&opcode,VS_GetOpcode(itype_instruction));
-					sprintf(line,"%s$%d,$%d,%d",opcode.name,rtype.rd,rtype.rd,imm & 0xFFFF);
-					return VS_ParseIType(opcode,instruction,line,file);
-				}
-				else{
-					strcpy(itype_instruction,op.name);
-					strcat(itype_instruction,"i");
-					VS_GetOpcodeFromIndex(&opcode,VS_GetOpcode(itype_instruction));
-					sprintf(line,"%sr%d,r%d,%d",opcode.name,rtype.rd,rtype.rd,imm & 0xFFFF);
-					return VS_ParseIType(opcode,instruction,line,file);
-				}
-			}
-			
-			return 1;
+			return VS_ReinterpretRTypeAsIType(file,op.name,rtype.rd,rtype.rd,operands,instruction,params);
 		}
 		else if(num_commas == 0){
 			return 0;
@@ -485,27 +615,23 @@ int VS_ParseRType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 		*instruction = VS_GetRegisterNumber("$0") << 21 | rtype.rs << 16 | rtype.rd << 11 | rtype.op;
 		return 1;
 	}
-	else if(!strcmp(op.name,"div") || !strcmp(op.name,"divu") || !strcmp(op.name,"mult") || !strcmp(op.name,"multu")){
+	else if(!strcmp(op.name,"div") || !strcmp(op.name,"divu") || !strcmp(op.name,"mult") || !strcmp(op.name,"multu") ||
+	!strcmp(op.name,"teq") || !strcmp(op.name,"tge") || !strcmp(op.name,"tgeu") || !strcmp(op.name,"tlt") || !strcmp(op.name,"tne")){
 		*instruction = rtype.rd << 21 | rtype.rs << 16 | rtype.op;
 		
-		if(rtype.rd == 0 || rtype.rs == 0){
-			return 4;
+		if(!strcmp(op.name,"div") || !strcmp(op.name,"divu")){
+			if(rtype.rd == 0 || rtype.rs == 0){
+				return 4;
+			}
 		}
 		
 		return 1;
 	}
-	else if(!strcmp(op.name,"teq") || !strcmp(op.name,"tge") || !strcmp(op.name,"tgeu") || !strcmp(op.name,"tlt") || !strcmp(op.name,"tne")){
-		*instruction = rtype.rd << 21 | rtype.rs << 16 | rtype.op;
-		return 1;
-	}
 	
-	rtype.rt = VS_GetRegister(line + len + size1 + size2 + 2, &size3);
+	rtype.rt = VS_GetRegister(line + len + size1 + size2 + 2, &size3, params);
 
-	if(line[len + size1 + size2 + 2] != '$' && rtype.rt < 0){
-		int num_commas = VS_GetNumberOfCommas(line);
-
-		if(num_commas == 1 && (!strcmp(op.name,"add") || !strcmp(op.name,"addu") || !strcmp(op.name,"and") || !strcmp(op.name,"sub") || !strcmp(op.name,"subu") 
-			|| !strcmp(op.name,"or") || !strcmp(op.name,"xor") || !strcmp(op.name,"nor") || !strcmp(op.name,"slt") || !strcmp(op.name,"sltu"))){
+	if(rtype.rt < 0){
+		if(num_commas == 1 && VS_IsValidReinterpretableRType(op.name)){
 			*instruction = rtype.rd << 21 | rtype.rs << 16 | rtype.rd << 11 | rtype.op;
 			return 1;
 		}
@@ -513,8 +639,7 @@ int VS_ParseRType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 			*instruction = rtype.rs << 21 | rtype.rd << 16 | rtype.rd << 11 | rtype.op;
 			return 1;
 		}
-		else if(num_commas == 2 && syntax == VS_ASMPSX_SYNTAX && (!strcmp(op.name,"add") || !strcmp(op.name,"addu") || !strcmp(op.name,"and") || !strcmp(op.name,"sub") || !strcmp(op.name,"subu") 
-			|| !strcmp(op.name,"or") || !strcmp(op.name,"xor"))){
+		else if(num_commas == 2 && params->syntax == VS_ASMPSX_SYNTAX && VS_IsValidReinterpretableRType(op.name)){
 				
 			char* operands = line + len + size1 + size2 + 2;
 			char reg[10];
@@ -529,51 +654,7 @@ int VS_ParseRType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 				return -9;
 			}
 
-			if(line[len + size1 + size2 + 2] == '-'){
-				neg = 1;
-			}
-			
-			is_valid_imm = VS_IsValidImmediate(line + len + size1 + size2 + 2);
-		
-			if(is_valid_imm == -1){
-				return -5;
-			}
-			else if(is_valid_imm == -2){
-			   return -6;	
-			}
-			
-			if(neg){
-				imm = (signed int)strtol(line + len + size1 + size2 + 2, NULL, 0);
-				
-				if(imm <= -32768 || imm >= 32768){
-					return -7;
-				}
-			}
-			else{
-				imm = (unsigned int)strtoul(line + len + size1 + size2 + 2, NULL, 0);
-				
-				if(imm >= 65536){
-					return -7;
-				}
-			}
-			
-			char itype_instruction[VS_MAX_LINE];
-			
-			if(!strcmp(op.name,"addu")){
-				strcpy(itype_instruction,"addiu");
-				VS_GetOpcodeFromIndex(&opcode,VS_GetOpcode(itype_instruction));
-				sprintf(line,"%sr%d,r%d,%d",opcode.name,rtype.rd,rtype.rs,imm);
-				return VS_ParseIType(opcode,instruction,line,file);
-			}
-			else{				
-				strcpy(itype_instruction,op.name);
-				strcat(itype_instruction,"i");
-				VS_GetOpcodeFromIndex(&opcode,VS_GetOpcode(itype_instruction));
-				sprintf(line,"%sr%d,r%d,%d",opcode.name,rtype.rd,rtype.rs,imm);
-				return VS_ParseIType(opcode,instruction,line,file);
-			}
-			
-			return 1;
+			return VS_ReinterpretRTypeAsIType(file,op.name,rtype.rd,rtype.rs,operands,instruction,params);
 		}
 		else return -1;
 	}
@@ -587,11 +668,9 @@ int VS_ParseRType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 	}
 	
 	if(!strcmp(op.name,"mul") || !strcmp(op.name,"umul")){
-		*instruction = rtype.rs << 21 | rtype.rt << 16 | rtype.op;
-		fwrite(instruction,4,1,file);
+		VS_WriteInstruction(file,rtype.rs << 21 | rtype.rt << 16 | rtype.op,params->endian);
 		*instruction = rtype.rd << 11 | 18; /* mflo */
 		instruction_count++;
-		return 1;
 	}
 	else if(!strcmp(op.name,"sllv") || !strcmp(op.name,"srav") || !strcmp(op.name,"srlv")){
 		*instruction = rtype.rt << 21 | rtype.rs << 16 | rtype.rd << 11 | rtype.op;
@@ -603,30 +682,37 @@ int VS_ParseRType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 	return 1;
 }
 
-int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* file){
+int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* file, VS_ASM_PARAMS* params){
 	VS_I_TYPE itype;
-	VS_OPCODE opcode;
-	unsigned long size1, size2, size3, instr;
-	int is_valid_imm, len, neg;
+	VS_SYM sym;
+	unsigned long size1, size2, size3;
+	int is_valid_imm, is_valid_prefix, len, neg, expr;
+	char* new_line, imm[256];
+	char trim[VS_MAX_LINE];
+	
+	VS_InitExprParser();
 	
 	memset(&itype,0x0,sizeof(VS_I_TYPE));
+	memset(imm,'\0',256);
+	memset(trim,'\0',VS_MAX_LINE);
 	
 	len = strlen(op.name);
+	imm[0] = '0'; imm[1] = 'x';
 	neg = 0;
 	is_valid_imm = 0;
-	instr = 0;
 	
 	if(!strcmp(op.name,"nop")){
-		*instruction = itype.op << 26 | itype.rs << 25 | itype.rt << 16 | itype.imm;
 		return 1;
 	}
 	
-	if(line[len] != '$' && syntax == VS_GNU_SYNTAX){
-		return -1;
+	is_valid_prefix = VS_IsValidRegisterPrefix(line,len,params->syntax);
+	
+	if(is_valid_prefix != 1){
+		return is_valid_prefix;
 	}
 	
 	itype.op = VS_Bin2Decimal(op.opcode);
-	itype.rt = VS_GetRegister(line + len, &size1);
+	itype.rt = VS_GetRegister(line + len, &size1, params);
 	
 	if(itype.rt == -1){
 		return -2;
@@ -643,19 +729,64 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 		itype.rs = itype.rt;
 		itype.rt = 0;
 		
-		is_valid_imm = VS_IsValidImmediate(line + len + size1 + 1);
+		new_line = line + len + size1 + 1;
 		
-		if(is_valid_imm == -1){
-			return -5;
-		}
-		else if(is_valid_imm == -2){
-		   return -6;	
-		}
-		 
-		itype.imm = (signed int)strtoul(line + len + size1 + 1, NULL, 0);
+		VS_TrimStrictLine(trim,new_line);
 		
-		if(itype.imm > 65535){
-			return -7;
+		if(trim[0] == '-'){
+			neg = 1;
+		}
+
+		is_valid_imm = VS_IsValidImmediate(trim, params);
+
+		if(VS_FindSymbol(trim) && is_valid_imm < 0){
+			sym = VS_GetSymbol(new_line);
+			itype.imm = sym.addr & 0xFFFF;
+		}
+		else if(VS_IsValidSymbolAddrOperator(trim[0]) && VS_FindSymbol(trim+1) && is_valid_imm < 0){
+			sym = VS_GetSymbol(trim+1);
+			
+			if(trim[0] == '>'){
+				itype.imm = (sym.addr >> 16) & 0xFFFF;
+			}
+			else{
+				itype.imm = sym.addr & 0xFFFF;
+			}
+		}
+		else if(VS_LineContainsOperator(trim+neg) && is_valid_imm < 0){
+			expr = VS_IsValidExpression(trim, params->syntax);
+			
+			if(!expr){
+				return -17;
+			}
+			
+			expr = VS_EvaluateExpr(trim, params->syntax);
+			sprintf(trim,"%d",expr);
+			is_valid_imm = VS_IsValidImmediate(trim, params);
+			
+			if(is_valid_imm == -1){
+				return -5;
+			}
+			else if(is_valid_imm == -2){
+			   return -6;	
+			}
+			
+			itype.imm = VS_ParseImmediateValue(trim, params);
+		}
+		else{
+			if(is_valid_imm == -1){
+				return -5;
+			}
+			else if(is_valid_imm == -2){
+			   return -6;	
+			}
+			
+			itype.imm = VS_ParseImmediateValue(trim, params);
+		}
+		
+		if(itype.imm > 65535 || itype.imm < 0){
+			*instruction = itype.op << 26 | itype.rt << 21 | itype.rs << 16 | (itype.imm & 0xFFFF);
+			return 5;
 		}
 		
 		*instruction = itype.op << 26 | itype.rt << 21 | itype.rs << 16 | (itype.imm & 0xFFFF);
@@ -667,7 +798,7 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 			neg = 1;
 		}
 			
-		is_valid_imm = VS_IsValidImmediate(line + len + size1 + 1 + neg);
+		is_valid_imm = VS_IsValidImmediate(line + len + size1 + 1 + neg, params);
 
 		if(is_valid_imm == -1){
 			return -5;
@@ -684,9 +815,9 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 	else if(!strcmp(op.name,"sll") || !strcmp(op.name,"sra") || !strcmp(op.name,"srl")){
 		int num_commas = VS_GetNumberOfCommas(line);
 		
-		itype.rs = VS_GetRegister(line + len + size1 + 1, &size2);
+		itype.rs = VS_GetRegister(line + len + size1 + 1, &size2, params);
 
-		if(line[len + size1 + 1] != '$' && itype.rs < 0){
+		if((line[len + size1 + 1] != '$' && params->syntax == VS_GNU_SYNTAX) || itype.rs < 0){
 			
 			char* operands = line + len + size1 + 1;
 			
@@ -695,12 +826,25 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 			}
 	
 			if(num_commas == 1){
-				
-				if(line[len + size1 + 1] == '-'){
+
+				if(operands[0] == '-'){
 					return -3;
 				}
+				
+				if(VS_LineContainsOperator(operands)){
+					expr = VS_IsValidExpression(operands, params->syntax);
 					
-				is_valid_imm = VS_IsValidImmediate(line + len + size1 + 1);
+					if(!expr){
+						return -17;
+					}
+					
+					expr = VS_EvaluateExpr(operands, params->syntax);
+					sprintf(operands,"%d",expr);
+					is_valid_imm = VS_IsValidImmediate(operands, params);
+				}
+				else{
+					is_valid_imm = VS_IsValidImmediate(operands, params);
+				}
 		
 				if(is_valid_imm == -1){
 					return -5;
@@ -709,7 +853,7 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 				   return -6;	
 				}
 				
-				itype.imm = (unsigned int)strtoul(line + len + size1 + 1, NULL, 0);
+				itype.imm = VS_ParseImmediateValue(operands, params);
 		
 				if(itype.imm < 0 || itype.imm > 31){
 					return -3;
@@ -721,7 +865,7 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 			}else return -1;
 		}
 		else if(num_commas == 1){
-			itype.rs = VS_GetRegister(line + len + size1 + 1, &size2);
+			itype.rs = VS_GetRegister(line + len + size1 + 1, &size2, params);
 		
 			if(itype.rs == -1){
 				return -2;
@@ -758,10 +902,27 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 			return 0;
 		}
 		
-		itype.imm = VS_GetRegister(line + len + size1 + size2 + 2, &size3);
+		itype.imm = VS_GetRegister(operands, &size3, params);
 	
 		if(itype.imm == -2){
-			is_valid_imm = VS_IsValidImmediate(line + len + size1 + 2 + size2);
+			if(operands[0] == '-'){
+				neg = 1;
+			}
+			
+			if(VS_LineContainsOperator(operands+neg)){
+				expr = VS_IsValidExpression(operands, params->syntax);
+				
+				if(!expr){
+					return -17;
+				}
+				
+				expr = VS_EvaluateExpr(operands, params->syntax);
+				sprintf(operands,"%d",expr);
+				is_valid_imm = VS_IsValidImmediate(operands, params);
+			}
+			else{
+				is_valid_imm = VS_IsValidImmediate(operands, params);
+			}
 		
 			if(is_valid_imm == -1){
 				return -5;
@@ -770,7 +931,7 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 			   return -6;	
 			}
 			
-			itype.imm = (unsigned int)strtoul(line + len + size1 + 2 + size2, NULL, 0);
+			itype.imm = VS_ParseImmediateValue(operands, params);
 			
 			if(itype.imm < 0 || itype.imm > 31){
 				return -3;
@@ -791,9 +952,9 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 		}
 	}
 	else{
-		itype.rs = VS_GetRegister(line + len + size1 + 1, &size2);
+		itype.rs = VS_GetRegister(line + len + size1 + 1, &size2, params);
 		
-		if(line[len + size1 + 1] != '$' && itype.rs < 0){
+		if((line[len + size1 + 1] != '$' && params->syntax == VS_GNU_SYNTAX) || itype.rs < 0){
 			
 			char* operands = line + len + size1 + 1;
 			
@@ -803,18 +964,30 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 	
 			int num_commas = VS_GetNumberOfCommas(line);
 			
-			if(line[len + size1 + 1] == '-'){
+			if(operands[0] == '-'){
 				neg = 1;
 			}
 			
-			is_valid_imm = VS_IsValidImmediate(line + len + size1 + 1);
-			
-			if(neg){
-				itype.imm = (signed int)strtol(line + len + size1 + 1, NULL, 0);
+			if(VS_LineContainsOperator(operands+neg)){		
+				expr = VS_IsValidExpression(operands, params->syntax);
+				
+				if(!expr){
+					return -17;
+				}
+				
+				expr = VS_EvaluateExpr(operands, params->syntax);
+				sprintf(operands,"%d",expr);
+				is_valid_imm = VS_IsValidImmediate(operands, params);
 			}
 			else{
-				itype.imm = (unsigned int)strtoul(line + len + size1 + 1, NULL, 0);
+				is_valid_imm = VS_IsValidImmediate(operands, params);
 			}
+			
+			if(operands[0] == '-'){
+				neg = 1;
+			}
+			
+			itype.imm = VS_ParseImmediateValue(operands, params);
 			
 			if(!strcmp(op.name,"subi") || !strcmp(op.name,"subiu")){
 				neg = 1;
@@ -822,35 +995,7 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 			}
 			
 			if((neg && (itype.imm <= -32678 || itype.imm >= 32767)) || itype.imm >= 65536){
-				char itype_instruction[10];
-				
-				instr = 15 << 26 | 1 << 16 | ((itype.imm >> 16) & 0xFFFF); /* lui */
-				fwrite(&instr,4,1,file);
-				instr = 13 << 26 | 1 << 21 | 1 << 16 | (itype.imm & 0xFFFF); /* ori */
-				fwrite(&instr,4,1,file);
-				memset(itype_instruction,'\0',10);
-				
-				unsigned long i, count;
-				for(i = 0, count = 0; i < strlen(op.name); i++){
-					if(op.name[i] != 'i'){
-						itype_instruction[count++] = op.name[i];
-					}
-				}
-
-				if(syntax == VS_GNU_SYNTAX){
-					VS_GetOpcodeFromIndex(&opcode,VS_GetOpcode(itype_instruction));
-					sprintf(line,"%s$%d,$%d,$%d",opcode.name,itype.rt,itype.rt,1);
-					VS_ParseRType(opcode,instruction,line,file);
-				}
-				else{
-					VS_GetOpcodeFromIndex(&opcode,VS_GetOpcode(itype_instruction));
-					sprintf(line,"%sr%d,r%d,r%d",opcode.name,itype.rt,itype.rt,1);
-					VS_ParseRType(opcode,instruction,line,file);
-				}
-					
-				instruction_count += 2;
-				
-				return 1;
+				return VS_ReinterpretITypeAsRType(file,op.name,itype.rt,itype.rt,itype.imm,instruction,params);
 			}
 
 			*instruction = itype.op << 26 | itype.rt << 21 | itype.rt << 16 | (itype.imm & 0xFFFF);
@@ -863,6 +1008,8 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 			}else return -2;
 		}
 		
+		new_line = line + len + size1 + 2 + size2;
+		
 		if(itype.rs == -1){
 			return -2;
 		}
@@ -871,7 +1018,7 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 			return -9;
 		}
 		
-		if(line[len + size1 + 2 + size2] == '-'){
+		if(new_line[0] == '-'){
 			neg = 1;
 		}
 		
@@ -879,7 +1026,20 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 			return 0;
 		}
 		
-		is_valid_imm = VS_IsValidImmediate(line + len + size1 + 2 + size2);
+		if(VS_LineContainsOperator(new_line+neg)){		
+			expr = VS_IsValidExpression(new_line, params->syntax);
+			
+			if(!expr){
+				return -17;
+			}
+			
+			expr = VS_EvaluateExpr(new_line, params->syntax);
+			sprintf(new_line,"%d",expr);
+			is_valid_imm = VS_IsValidImmediate(new_line, params);
+		}
+		else{
+			is_valid_imm = VS_IsValidImmediate(new_line, params);
+		}
 		
 		if(is_valid_imm == -1){
 			return -5;
@@ -888,12 +1048,7 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 		   return -6;	
 		}
 		
-		if(neg){
-			itype.imm = (signed int)strtol(line + len + size1 + 2 + size2, NULL, 0);
-		}
-		else{
-			itype.imm = (unsigned long)strtoul(line + len + size1 + 2 + size2, NULL, 0);
-		}
+		itype.imm = VS_ParseImmediateValue(new_line, params);
 		
 		if(!strcmp(op.name,"subi") || !strcmp(op.name,"subiu")){
 			neg = 1;
@@ -901,36 +1056,7 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 		}
 		
 		if((neg && (itype.imm <= -32678 || itype.imm >= 32767)) || itype.imm >= 65536){
-			char itype_instruction[10];
-			
-			instr = 15 << 26 | 1 << 16 | ((itype.imm >> 16) & 0xFFFF); /* lui */
-			fwrite(&instr,4,1,file);
-			instr = 13 << 26 | 1 << 21 | 1 << 16 | (itype.imm & 0xFFFF); /* ori */
-			fwrite(&instr,4,1,file);
-			
-			memset(itype_instruction,'\0',10);
-				
-			unsigned long i, count;
-			for(i = 0, count = 0; i < strlen(op.name); i++){
-				if(op.name[i] != 'i'){
-					itype_instruction[count++] = op.name[i];
-				}
-			}
-
-			if(syntax == VS_GNU_SYNTAX){
-				VS_GetOpcodeFromIndex(&opcode,VS_GetOpcode(itype_instruction));
-				sprintf(line,"%s$%d,$%d,$%d",opcode.name,itype.rt,itype.rt,1);
-				VS_ParseRType(opcode,instruction,line,file);
-			}
-			else{
-				VS_GetOpcodeFromIndex(&opcode,VS_GetOpcode(itype_instruction));
-				sprintf(line,"%sr%d,r%d,r%d",opcode.name,itype.rt,itype.rt,1);
-				VS_ParseRType(opcode,instruction,line,file);
-			}
-				
-			instruction_count += 2;
-			
-			return 1;
+			return VS_ReinterpretITypeAsRType(file,op.name,itype.rt,itype.rs,itype.imm,instruction,params);
 		}
 
 		*instruction = itype.op << 26 | itype.rs << 21 | itype.rt << 16 | (itype.imm & 0xFFFF);
@@ -939,9 +1065,9 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 	return 1;
 }
 
-int VS_ParseJType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* file){
+int VS_ParseJType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* file, VS_ASM_PARAMS* params){
 	VS_SYM sym;
-	unsigned long encode, addr;
+	unsigned long addr, symbol_ind;
 	int len, is_valid_imm;
 	char new_line[VS_MAX_LINE+1];
 	
@@ -949,190 +1075,172 @@ int VS_ParseJType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 
 	VS_CopyLabelName(new_line, line, len);
 	
-	is_valid_imm = VS_IsValidImmediate(new_line);
+	is_valid_imm = VS_IsValidImmediate(new_line, params);
 	
 	if(VS_FindSymbol(new_line)){
 		sym = VS_GetSymbol(new_line);
 		addr = sym.addr;
 		
 		if(OEXE){
-			addr += org;
+			addr += params->org;
 		}
 		
 		if(!strcmp(op.name,"j") || !strcmp(op.name,"jal")){
 			VS_SetRelocTrue();
 			VS_SetPSYQRelocTrue();
-			VS_AddRelocEntry((instruction_count << 2), VS_MIPS_26, 1);
-			VS_AddPSYQRelocEntry(symbol_index, VS_PSYQ_26, ((instruction_count - label_instruction_count) << 2), 2, addr);
+			
+			if(sym.type != VS_SYM_UND){
+				VS_AddRelocEntry((instruction_count << 2), VS_MIPS_26, 1);
+				VS_AddPSYQRelocEntry(symbol_index, VS_PSYQ_26, ((instruction_count - label_instruction_count) << 2), 2, addr);
+			}
+			else{
+				VS_AddUndefinedRelocEntry((instruction_count << 2), VS_MIPS_26, sym.string_table_index + 8);
+				VS_AddUndefinedPSYQRelocEntry(symbol_index, VS_PSYQ_26, ((instruction_count - label_instruction_count) << 2), 2, sym.string_table_index + 8);
+			}
 		}
 		
 		*instruction = VS_Bin2Decimal(op.opcode) << 26 | (((addr >> 2) & 0x3FFFFFF));
 		
-		if(safe_load_delay){
-			encode = VS_Bin2Decimal(op.opcode) << 26 | (((addr >> 2) & 0x3FFFFFF));
-			fwrite(&encode,4,1,file);
-			encode = 0;
-			fwrite(&encode,4,1,file);
-			instruction_count++;
-			return 2;
-		}
-		
-		return 1;
+		return VS_WriteLoadDelay(file,instruction,params->endian);
 	}
 	else if(is_valid_imm != -1 && is_valid_imm != -2){
 		addr = (unsigned long)strtoul(new_line, NULL, 0);
 		
 		*instruction = VS_Bin2Decimal(op.opcode) << 26 | (((addr >> 2) & 0x3FFFFFF));
-
-		if(safe_load_delay){
-			encode = VS_Bin2Decimal(op.opcode) << 26 | (((addr >> 2) & 0x3FFFFFF));
-			fwrite(&encode,4,1,file);
-			encode = 0;
-			fwrite(&encode,4,1,file);
-			instruction_count++;
-			return 2;
-		}
 		
-		return 1;
+		return VS_WriteLoadDelay(file,instruction,params->endian);
 	}
-	else if(new_line[0] == '0' && new_line[1] == 'x'){
+	else if((new_line[0] == '0' && new_line[1] == 'x') || (new_line[0] == '$' && params->syntax == VS_ASMPSX_SYNTAX)){
 		return -5;
+	}
+	else if(params->undefsym){
+		VS_TrimStrictLine(new_line,line + strlen(op.name));
+		symbol_ind = VS_AddSymbol(new_line,instruction_count,0,VS_SYM_UND,VS_SCOPE_GLOBAL);
+		VS_SetRelocTrue();
+		VS_SetPSYQRelocTrue();
+		VS_AddUndefinedRelocEntry((instruction_count << 2), VS_MIPS_26, symbol_ind + 8);
+		VS_AddUndefinedPSYQRelocEntry(symbol_index, VS_PSYQ_26, ((instruction_count - label_instruction_count) << 2), 2, symbol_ind + 8);
+		*instruction = VS_Bin2Decimal(op.opcode) << 26;
+		return VS_WriteLoadDelay(file,instruction,params->endian);
 	}
 	else return -4;
 }
 
-int VS_ParseBType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* file){
+int VS_ParseBType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* file, VS_ASM_PARAMS* params){
 	VS_B_TYPE btype;
 	VS_SYM sym;
 	int len;
 	char new_line[VS_MAX_LINE+1];
-	unsigned long size1, size2, encode;
-	int offset, cop, mips2;
+	unsigned long size1, size2, encode, symbol_ind;
+	int offset, cop, nd, tf, sym_found;
 	unsigned char pseudo_op;
 	
 	len = strlen(op.name);
 
-	if(!strcmp(op.name,"b")){
+	if(!strcmp(op.name,"b") || !strcmp(op.name,"bal")){
 		VS_CopyLabelName(new_line, line, len);
 		
 		if(VS_FindSymbol(new_line)){
 			sym = VS_GetSymbol(new_line);
 			offset = sym.instruction_count - instruction_count;
 			offset--;
+			
+			if(sym.type == VS_SYM_UND){
+				VS_SetRelocTrue();
+				VS_SetPSYQRelocTrue();
+				VS_AddUndefinedRelocEntry((instruction_count << 2), VS_MIPS_PC16, sym.string_table_index + 8);
+				VS_AddUndefinedPSYQRelocEntry(symbol_index, VS_PSYQ_26, ((instruction_count - label_instruction_count) << 2), 2, sym.string_table_index + 8);
+			}
 			
 			*instruction = VS_Bin2Decimal(op.opcode) << 26 | (offset & 0xFFFF);
 			
-			if(safe_load_delay){
-				encode = VS_Bin2Decimal(op.opcode) << 26 | (offset & 0xFFFF);
-				fwrite(&encode,4,1,file);
-				encode = 0;
-				fwrite(&encode,4,1,file);
-				instruction_count++;
-				return 2;
+			if(!strcmp(op.name,"bal")){
+				*instruction |= 17 << 16;
 			}
+			
+			return VS_WriteLoadDelay(file,instruction,params->endian);
 		}
-		else{
-			return -4;
+		else if(params->undefsym){
+			VS_TrimStrictLine(new_line,line + strlen(op.name));
+			symbol_ind = VS_AddSymbol(new_line,instruction_count,0,VS_SYM_UND,VS_SCOPE_GLOBAL);
+			VS_SetRelocTrue();
+			VS_SetPSYQRelocTrue();
+			VS_AddUndefinedRelocEntry((instruction_count << 2), VS_MIPS_PC16, symbol_ind + 8);
+			VS_AddUndefinedPSYQRelocEntry(symbol_index, VS_PSYQ_26, ((instruction_count - label_instruction_count) << 2), 2, symbol_ind + 8);
+			*instruction = VS_Bin2Decimal(op.opcode) << 26;
+			
+			if(!strcmp(op.name,"bal")){
+				*instruction |= 17 << 16;
+			}
+			
+			return VS_WriteLoadDelay(file,instruction,params->endian);
 		}
+		else return -4;
 	}
-	else if(!strcmp(op.name,"bc2f") || !strcmp(op.name,"bc1f") || !strcmp(op.name,"bc2fl") || !strcmp(op.name,"bc1fl")){
+	else if(!strcmp(op.name,"bc2f") || !strcmp(op.name,"bc1f") || !strcmp(op.name,"bc2fl") || !strcmp(op.name,"bc1fl") 
+		|| !strcmp(op.name,"bc2t") || !strcmp(op.name,"bc1t") || !strcmp(op.name,"bc2tl") || !strcmp(op.name,"bc1tl")){
 		VS_CopyLabelName(new_line, line, len);
 		
-		if(!strcmp(op.name,"bc2f") || !strcmp(op.name,"bc2fl")){
-			cop = 18;
+		if(!strcmp(op.name,"bc1f") || !strcmp(op.name,"bc2f")){
+			nd = 0;
+			tf = 0;
+		}
+		else if(!strcmp(op.name,"bc1fl") || !strcmp(op.name,"bc2fl")){
+			nd = 1;
+			tf = 0;
+		}
+		else if(!strcmp(op.name,"bc1t") || !strcmp(op.name,"bc2t")){
+			nd = 0;
+			tf = 1;
 		}
 		else{
+			nd = 1;
+			tf = 1;
+		}
+		
+		if(!strncmp(op.name,"bc1",3)){
 			cop = 17;
 		}
-		
-		if(!strcmp(op.name,"bc2fl") || !strcmp(op.name,"bc1fl")){
-			mips2 = 1;
-		}
 		else{
-			mips2 = 0;
-		}
-		
-		if(VS_FindSymbol(new_line)){
-			sym = VS_GetSymbol(new_line);
-			offset = sym.instruction_count - instruction_count;
-			offset--;
-			
-			*instruction = cop << 26 | VS_Bin2Decimal(op.opcode) << 21 | mips2 << 17 | (offset & 0xFFFF);
-			
-			if(safe_load_delay){
-				encode = cop << 26 | VS_Bin2Decimal(op.opcode) << 21 | mips2 << 17 | (offset & 0xFFFF);
-				fwrite(&encode,4,1,file);
-				encode = 0;
-				fwrite(&encode,4,1,file);
-				instruction_count++;
-				return 2;
-			}
-		}
-	}
-	else if(!strcmp(op.name,"bc2t") || !strcmp(op.name,"bc1t") || !strcmp(op.name,"bc2tl") || !strcmp(op.name,"bc1tl")){
-		VS_CopyLabelName(new_line, line, len);
-		
-		if(!strcmp(op.name,"bc2t") || !strcmp(op.name,"bc2tl")){
 			cop = 18;
 		}
-		else{
-			cop = 17;
-		}
-		
-		if(!strcmp(op.name,"bc2tl") || !strcmp(op.name,"bc1tl")){
-			mips2 = 1;
-		}
-		else{
-			mips2 = 0;
-		}
 		
 		if(VS_FindSymbol(new_line)){
 			sym = VS_GetSymbol(new_line);
 			offset = sym.instruction_count - instruction_count;
 			offset--;
 			
-			*instruction = cop << 26 | VS_Bin2Decimal(op.opcode) << 21 | mips2 << 17 | 1 << 16 | (offset & 0xFFFF);
-			
-			if(safe_load_delay){
-				encode = cop << 26 | VS_Bin2Decimal(op.opcode) << 21 | mips2 << 17 | 1 << 16  | (offset & 0xFFFF);
-				fwrite(&encode,4,1,file);
-				encode = 0;
-				fwrite(&encode,4,1,file);
-				instruction_count++;
-				return 2;
+			if(sym.type == VS_SYM_UND){
+				VS_SetRelocTrue();
+				VS_SetPSYQRelocTrue();
+				VS_AddUndefinedRelocEntry((instruction_count << 2), VS_MIPS_PC16, sym.string_table_index + 8);
+				VS_AddUndefinedPSYQRelocEntry(symbol_index, VS_PSYQ_26, ((instruction_count - label_instruction_count) << 2), 2, sym.string_table_index + 8);
 			}
-		}
-	}
-	else if(!strcmp(op.name,"bal")){
-		VS_CopyLabelName(new_line, line, len);
-		
-		if(VS_FindSymbol(new_line)){
-			sym = VS_GetSymbol(new_line);
-			offset = sym.instruction_count - instruction_count;
-			offset--;
 			
-			*instruction = VS_Bin2Decimal(op.opcode) << 26 | 17 << 16 | (offset & 0xFFFF);
+			*instruction = cop << 26 | VS_Bin2Decimal(op.opcode) << 21 | nd << 17 | tf << 16 | (offset & 0xFFFF);
 			
-			if(safe_load_delay){
-				encode = VS_Bin2Decimal(op.opcode) << 26 | 17 << 16 | (offset & 0xFFFF);
-				fwrite(&encode,4,1,file);
-				encode = 0;
-				fwrite(&encode,4,1,file);
-				instruction_count++;
-				return 2;
-			}
+			return VS_WriteLoadDelay(file,instruction,params->endian);
 		}
-		else{
-			return -4;
+		else if(params->undefsym){
+			VS_TrimStrictLine(new_line,line + strlen(op.name));
+			symbol_ind = VS_AddSymbol(new_line,instruction_count,0,VS_SYM_UND,VS_SCOPE_GLOBAL);
+			VS_SetRelocTrue();
+			VS_SetPSYQRelocTrue();
+			VS_AddUndefinedRelocEntry((instruction_count << 2), VS_MIPS_PC16, symbol_ind + 8);
+			VS_AddUndefinedPSYQRelocEntry(symbol_index, VS_PSYQ_26, ((instruction_count - label_instruction_count) << 2), 2, symbol_ind + 8);
+			*instruction = cop << 26 | VS_Bin2Decimal(op.opcode) << 21 | nd << 17 | tf << 16;
+			
+			return VS_WriteLoadDelay(file,instruction,params->endian);
 		}
+		else return -4;
 	}
 	else{
-		if(line[len] != '$' && syntax == VS_GNU_SYNTAX){
+		if(line[len] != '$' && params->syntax == VS_GNU_SYNTAX){
 			return -1;
 		}
 		
 		btype.op = VS_Bin2Decimal(op.opcode);
-		btype.rs = VS_GetRegister(line + len, &size1);
+		btype.rs = VS_GetRegister(line + len, &size1, params);
 		
 		if(btype.rs == -1){
 			return -2;
@@ -1142,8 +1250,21 @@ int VS_ParseBType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 			return -9;
 		}
 		
-		if(!strcmp(op.name,"bgezal") || !strcmp(op.name,"bltzal") || !strcmp(op.name,"bgezall") || !strcmp(op.name,"bltzall") || !strcmp(op.name,"bgezl")
-			|| !strcmp(op.name,"bltzl")){
+		if(VS_IsValidRegImmType(op.name) || VS_IsValidBranchOnZeroType(op.name)){
+			int regimm = 0;
+			if(VS_IsValidRegImmType(op.name)){
+				regimm = 1;
+			}
+			
+			if(!regimm){
+				if(!strcmp(op.name,"bgez")){
+					btype.rt = 1;
+				}
+				else{
+					btype.rt = 0;
+				}
+			}
+			
 			VS_CopyLabelName(new_line, line, len + size1 + 1);
 			
 			if(VS_FindSymbol(new_line)){
@@ -1151,45 +1272,47 @@ int VS_ParseBType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 				offset = sym.instruction_count - instruction_count;
 				offset--;
 				
-				*instruction = 1 << 26 | btype.rs << 21 | VS_Bin2Decimal(op.opcode) << 16 | (offset & 0xFFFF);
+				if(sym.type == VS_SYM_UND){
+					VS_SetRelocTrue();
+					VS_SetPSYQRelocTrue();
+					VS_AddUndefinedRelocEntry((instruction_count << 2), VS_MIPS_PC16, sym.string_table_index + 8);
+					VS_AddUndefinedPSYQRelocEntry(symbol_index, VS_PSYQ_26, ((instruction_count - label_instruction_count) << 2), 2, sym.string_table_index + 8);
+				}
+				
+				if(!regimm){
+					*instruction = VS_Bin2Decimal(op.opcode) << 26 | btype.rs << 21 | btype.rt << 16 | (offset & 0xFFFF);
+				}
+				else{
+					*instruction = 1 << 26 | btype.rs << 21 | VS_Bin2Decimal(op.opcode) << 16 | (offset & 0xFFFF);
+				}
 				
 				if(safe_load_delay){
 					encode = *instruction;
-					fwrite(&encode,4,1,file);
-					encode = 0;
-					fwrite(&encode,4,1,file);
+					VS_WriteInstruction(file,encode,params->endian);
+					VS_WriteNop(file);
 					instruction_count++;
 					return 2;
 				}
 			}
-			else{
-				return -4;
-			}
-		}
-		else if(!strcmp(op.name,"bgtz") || !strcmp(op.name,"blez") || !strcmp(op.name,"bltz") || !strcmp(op.name,"beqz") || !strcmp(op.name,"bnez")
-			|| !strcmp(op.name,"bgez") || !strcmp(op.name,"bgtzl") || !strcmp(op.name,"blezl")){
+			else if(params->undefsym){
+				VS_TrimStrictLine(new_line,line + len + size1 + 1);
+				symbol_ind = VS_AddSymbol(new_line,instruction_count,0,VS_SYM_UND,VS_SCOPE_GLOBAL);
+				VS_SetRelocTrue();
+				VS_SetPSYQRelocTrue();
+				VS_AddUndefinedRelocEntry((instruction_count << 2), VS_MIPS_PC16, symbol_ind + 8);
+				VS_AddUndefinedPSYQRelocEntry(symbol_index, VS_PSYQ_26, ((instruction_count - label_instruction_count) << 2), 2, symbol_ind + 8);
 				
-			if(!strcmp(op.name,"bgez")){
-				btype.rt = 1;
-			}
-			else{
-				btype.rt = 0;
-			}
-			
-			VS_CopyLabelName(new_line, line, len + size1 + 1);
-			
-			if(VS_FindSymbol(new_line)){
-				sym = VS_GetSymbol(new_line);
-				offset = sym.instruction_count - instruction_count;
-				offset--;
-				
-				*instruction = VS_Bin2Decimal(op.opcode) << 26 | btype.rs << 21 | btype.rt << 16 | (offset & 0xFFFF);
+				if(!regimm){
+					*instruction = VS_Bin2Decimal(op.opcode) << 26 | btype.rs << 21 | btype.rt << 16;
+				}
+				else{
+					*instruction = 1 << 26 | btype.rs << 21 | VS_Bin2Decimal(op.opcode) << 16;
+				}
 				
 				if(safe_load_delay){
-					encode = VS_Bin2Decimal(op.opcode) << 26 | btype.rs << 21 | btype.rt << 16 | (offset & 0xFFFF);
-					fwrite(&encode,4,1,file);
-					encode = 0;
-					fwrite(&encode,4,1,file);
+					encode = *instruction;
+					VS_WriteInstruction(file,encode,params->endian);
+					VS_WriteNop(file);
 					instruction_count++;
 					return 2;
 				}
@@ -1198,8 +1321,8 @@ int VS_ParseBType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 				return -4;
 			}
 		}
-		else if(!strcmp(op.name,"blt") || !strcmp(op.name,"bltu") || !strcmp(op.name,"bgt") || !strcmp(op.name,"bgtu") || !strcmp(op.name,"bge")  || !strcmp(op.name,"bgeu") || !strcmp(op.name,"ble")){
-			btype.rt = VS_GetRegister(line + len + size1 + 1, &size2);
+		else if(!strcmp(op.name,"blt") || !strcmp(op.name,"bltu") || !strcmp(op.name,"bgt") || !strcmp(op.name,"bgtu") || !strcmp(op.name,"bge") || !strcmp(op.name,"bgeu") || !strcmp(op.name,"ble")){
+			btype.rt = VS_GetRegister(line + len + size1 + 1, &size2, params);
 			
 			if(line[len + size1 + 1] != '$' && btype.rt < 0){
 				return -1;
@@ -1217,10 +1340,19 @@ int VS_ParseBType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 
 			VS_CopyLabelName(new_line, line, len + size1 + size2 + 2);
 			
-			if(VS_FindSymbol(new_line)){
+			sym_found = VS_FindSymbol(new_line);
+			
+			if(sym_found || params->undefsym){
 				sym = VS_GetSymbol(new_line);
 				offset = sym.instruction_count - instruction_count;
 				offset -= 2;
+				
+				if(sym.type == VS_SYM_UND && sym_found){
+					VS_SetRelocTrue();
+					VS_SetPSYQRelocTrue();
+					VS_AddUndefinedRelocEntry((instruction_count << 2), VS_MIPS_PC16, sym.string_table_index + 8);
+					VS_AddUndefinedPSYQRelocEntry(symbol_index, VS_PSYQ_26, ((instruction_count - label_instruction_count) << 2), 2, sym.string_table_index + 8);
+				}
 				
 				unsigned long instruction1;
 				
@@ -1235,15 +1367,13 @@ int VS_ParseBType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 					
 					instruction1 = btype.rs << 21 | btype.rt << 16 | VS_GetRegisterNumber("$at") << 11 | pseudo_op;
 					
-					fwrite(&instruction1,4,1,file);
+					VS_WriteInstruction(file,instruction1,params->endian);
 					instruction1 = 4 << 26 | VS_GetRegisterNumber("$at") << 21 | 0 << 16 | (offset & 0xFFFF);
-					fwrite(&instruction1,4,1,file);
+					VS_WriteInstruction(file,instruction1,params->endian);
 					
 					if(safe_load_delay){
-						encode = 0;
-						fwrite(&encode,4,1,file);
+						VS_WriteNop(file);
 						instruction_count += 2;
-						return 2;
 					}
 				}
 				else if(!strcmp(op.name,"ble") || !strcmp(op.name,"bleu")){
@@ -1257,15 +1387,13 @@ int VS_ParseBType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 					
 					instruction1 = btype.rt << 21 | btype.rs << 16 | VS_GetRegisterNumber("$at") << 11 | pseudo_op;
 					
-					fwrite(&instruction1,4,1,file);
+					VS_WriteInstruction(file,instruction1,params->endian);
 					instruction1 = 4 << 26 | VS_GetRegisterNumber("$at") << 21 | 0 << 16 | (offset & 0xFFFF);
-					fwrite(&instruction1,4,1,file);
+					VS_WriteInstruction(file,instruction1,params->endian);
 					
 					if(safe_load_delay){
-						encode = 0;
-						fwrite(&encode,4,1,file);
+						VS_WriteNop(file);
 						instruction_count += 2;
-						return 2;
 					}
 				}
 				else{
@@ -1282,28 +1410,33 @@ int VS_ParseBType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 						instruction1 = btype.rt << 21 | btype.rs << 16 | VS_GetRegisterNumber("$at") << 11 | 43;
 					}
 					
-					fwrite(&instruction1,4,1,file);
+					VS_WriteInstruction(file,instruction1,params->endian);
 					instruction1 = 5 << 26 | VS_GetRegisterNumber("$at") << 21 | 0 << 16 | (offset & 0xFFFF);
-					fwrite(&instruction1,4,1,file);
+					VS_WriteInstruction(file,instruction1,params->endian);
 					
 					if(safe_load_delay){
-						encode = 0;
-						fwrite(&encode,4,1,file);
+						VS_WriteNop(file);
 						instruction_count += 2;
-						return 2;
 					}
+				}
+				
+				if(!sym_found && params->undefsym){
+					VS_TrimStrictLine(new_line,line + len + size1 + size2 + 2);
+					symbol_ind = VS_AddSymbol(new_line,instruction_count,0,VS_SYM_UND,VS_SCOPE_GLOBAL);
+					VS_SetRelocTrue();
+					VS_SetPSYQRelocTrue();
+					VS_AddUndefinedRelocEntry((instruction_count << 2), VS_MIPS_PC16, symbol_ind + 8);
+					VS_AddUndefinedPSYQRelocEntry(symbol_index, VS_PSYQ_26, ((instruction_count - label_instruction_count) << 2), 2, symbol_ind + 8);
 				}
 				
 				instruction_count++;
 			}
-			else{
-				return -4;
-			}
+			else return -4;
 			
 			return 2;
 		}
 		else{
-			btype.rt = VS_GetRegister(line + len + size1 + 1, &size2);
+			btype.rt = VS_GetRegister(line + len + size1 + 1, &size2, params);
 			
 			if(line[len + size1 + 1] != '$' && btype.rt < 0){
 				return -1;
@@ -1324,20 +1457,30 @@ int VS_ParseBType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 				offset = sym.instruction_count - instruction_count;
 				offset--;
 				
+				if(sym.type == VS_SYM_UND){
+					VS_SetRelocTrue();
+					VS_SetPSYQRelocTrue();
+					VS_AddUndefinedRelocEntry((instruction_count << 2), VS_MIPS_PC16, sym.string_table_index + 8);
+					VS_AddUndefinedPSYQRelocEntry(symbol_index, VS_PSYQ_26, ((instruction_count - label_instruction_count) << 2), 2, sym.string_table_index + 8);
+				}
+				
 				*instruction = VS_Bin2Decimal(op.opcode) << 26 | btype.rs << 21 | btype.rt << 16 | (offset & 0xFFFF);
 				
-				if(safe_load_delay){
-					encode = VS_Bin2Decimal(op.opcode) << 26 | btype.rs << 21 | btype.rt << 16 | (offset & 0xFFFF);
-					fwrite(&encode,4,1,file);
-					encode = 0;
-					fwrite(&encode,4,1,file);
-					instruction_count++;
-					return 2;
-				}
+				return VS_WriteLoadDelay(file,instruction,params->endian);
 			}
-			else{
-				return -4;
+			else if(params->undefsym){
+				VS_TrimStrictLine(new_line,line + len + size1 + size2 + 2);
+				symbol_ind = VS_AddSymbol(new_line,instruction_count,0,VS_SYM_UND,VS_SCOPE_GLOBAL);
+				VS_SetRelocTrue();
+				VS_SetPSYQRelocTrue();
+				VS_AddUndefinedRelocEntry((instruction_count << 2), VS_MIPS_PC16, symbol_ind + 8);
+				VS_AddUndefinedPSYQRelocEntry(symbol_index, VS_PSYQ_26, ((instruction_count - label_instruction_count) << 2), 2, symbol_ind + 8);
+				
+				*instruction = VS_Bin2Decimal(op.opcode) << 26 | btype.rs << 21 | btype.rt << 16;
+				
+				return VS_WriteLoadDelay(file,instruction,params->endian);
 			}
+			else return -4;
 		}
 		
 	}		
@@ -1345,21 +1488,25 @@ int VS_ParseBType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 	return 1;
 }
 
-int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* file){
+int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* file, VS_ASM_PARAMS* params){
 	VS_ADDR_TYPE atype;
 	VS_SYM sym;
-	int len, is_valid_imm, reg;
+	int len, is_valid_imm, is_valid_prefix, reg, expr;
 	char new_line[VS_MAX_LINE+1];
-	unsigned long end, size1;
+	unsigned long end, size1, symbol_ind;
 	unsigned long start;
 	unsigned char neg;
+	
+	VS_InitExprParser();
 	
 	len = strlen(op.name);
 	atype.op = VS_Bin2Decimal(op.opcode);
 	neg = 0;
 	
-	if(line[len] != '$' && syntax == VS_GNU_SYNTAX){
-		return -1;
+	is_valid_prefix = VS_IsValidRegisterPrefix(line,len,params->syntax);
+	
+	if(is_valid_prefix != 1){
+		return is_valid_prefix;
 	}
 	
 	if(!strcmp(op.name,"li")){
@@ -1367,7 +1514,7 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 			return -10;
 		}
 		
-		reg = VS_GetRegister(line + len, &size1);
+		reg = VS_GetRegister(line + len, &size1, params);
 		
 		if(reg == -1){
 			return -2;
@@ -1383,7 +1530,20 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 			neg = 1;
 		}
 		
-		is_valid_imm = VS_IsValidImmediate(new_line);
+		if(VS_LineContainsOperator(new_line+neg)){		
+			expr = VS_IsValidExpression(new_line, params->syntax);
+			
+			if(!expr){
+				return -17;
+			}
+			
+			expr = VS_EvaluateExpr(new_line, params->syntax);
+			sprintf(new_line,"%d",expr);
+			is_valid_imm = VS_IsValidImmediate(new_line, params);
+		}
+		else{
+			is_valid_imm = VS_IsValidImmediate(new_line, params);
+		}
 		
 		if(is_valid_imm == -1){
 			return -5;
@@ -1392,17 +1552,17 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 		   return -6;	
 		}
 		
-		start = (unsigned long)strtoul(new_line+neg, NULL, 0);
+		start = VS_ParseImmediateValue(new_line, params);
 		
 		if(neg){
-			signed int negative = -start;
+			signed int negative = start;
 			
 			if(negative <= -32678 || negative >= 32767){
 				*instruction = 15 << 26 | reg << 16 | ((negative >> 16) & 0xFFFF);
 				start = 13 << 26 | reg << 21 | reg << 16 | (negative & 0xFFFF);
 				
-				fwrite(instruction,4,1,file);
-				fwrite(&start,4,1,file);
+				VS_WriteInstruction(file,*instruction,params->endian);
+				VS_WriteInstruction(file,start,params->endian);
 				
 				instruction_count++;
 				return 2;
@@ -1418,8 +1578,8 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 				*instruction = 15 << 26 | reg << 16 | ((start >> 16) & 0xFFFF);
 				start = 13 << 26 | reg << 21 | reg << 16 | (start & 0xFFFF);
 				
-				fwrite(instruction,4,1,file);
-				fwrite(&start,4,1,file);
+				VS_WriteInstruction(file,*instruction,params->endian);
+				VS_WriteInstruction(file,start,params->endian);
 				
 				instruction_count++;
 			}
@@ -1436,7 +1596,7 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 		return 2;
 	}
 	else if(!strcmp(op.name,"la")){		
-		reg = VS_GetRegister(line + len, &size1);
+		reg = VS_GetRegister(line + len, &size1, params);
 		
 		if(VS_GetNumberOfCommas(line) != 1){
 			return -10;
@@ -1461,13 +1621,21 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 			start = sym.addr;
 			
 			if(OEXE && sym.type == VS_SYM_FUNC){
-				start += org;
+				start += params->org;
 			}
 			
 			VS_SetRelocTrue();
 			VS_SetPSYQRelocTrue();
 			
-			if(sym.type == VS_SYM_OBJ){
+			if(sym.type == VS_SYM_UND){
+				VS_SetRelocTrue();
+				VS_SetPSYQRelocTrue();
+				VS_AddUndefinedRelocEntry((instruction_count << 2), VS_MIPS_HI_16, sym.string_table_index + 8);
+				VS_AddUndefinedRelocEntry((instruction_count + 1) << 2, VS_MIPS_LO_16, sym.string_table_index + 8);
+				VS_AddUndefinedPSYQRelocEntry(sym.string_table_index + 8, VS_PSYQ_HI_16, ((instruction_count - label_instruction_count) << 2), 3, 0);
+				VS_AddUndefinedPSYQRelocEntry(sym.string_table_index + 8, VS_PSYQ_LO_16, (((instruction_count + 1) - label_instruction_count) << 2), 3, 0);
+			}
+			else if(sym.type == VS_SYM_OBJ){
 				VS_AddRelocEntry((instruction_count << 2), VS_MIPS_HI_16, 0);
 				VS_AddRelocEntry((instruction_count + 1) << 2, VS_MIPS_LO_16, 0);
 				VS_AddPSYQRelocEntry(symbol_index, VS_PSYQ_HI_16, ((instruction_count - label_instruction_count) << 2), 3, start);
@@ -1483,8 +1651,28 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 			end = 15 << 26 | reg << 16 | ((start >> 16) & 0xFFFF);
 			start = 13 << 26 | reg << 21 | reg << 16 | (start & 0xFFFF);
 			
-			fwrite(&end,4,1,file);
-			fwrite(&start,4,1,file);
+			VS_WriteInstruction(file,end,params->endian);
+			VS_WriteInstruction(file,start,params->endian);
+			
+			instruction_count++;
+		}
+		else if(params->undefsym){
+			VS_TrimStrictLine(new_line,line + len + size1 + 1);
+			symbol_ind = VS_AddSymbol(new_line,instruction_count,0,VS_SYM_UND,VS_SCOPE_GLOBAL);
+			VS_SetRelocTrue();
+			VS_SetPSYQRelocTrue();
+			VS_AddUndefinedRelocEntry((instruction_count << 2), VS_MIPS_HI_16, symbol_ind + 8);
+			VS_AddUndefinedRelocEntry(((instruction_count + 1) << 2), VS_MIPS_LO_16, symbol_ind + 8);
+			VS_AddUndefinedPSYQRelocEntry(symbol_ind + 8, VS_PSYQ_HI_16, ((instruction_count - label_instruction_count) << 2), 2, 0);
+			VS_AddUndefinedPSYQRelocEntry(symbol_ind + 8, VS_PSYQ_LO_16, (((instruction_count + 1) - label_instruction_count) << 2), 2, 0);
+			
+			start = 0;
+			
+			end = 15 << 26 | reg << 16 | ((start >> 16) & 0xFFFF);
+			start = 13 << 26 | reg << 21 | reg << 16 | (start & 0xFFFF);
+			
+			VS_WriteInstruction(file,end,params->endian);
+			VS_WriteInstruction(file,start,params->endian);
 			
 			instruction_count++;
 		}
@@ -1493,7 +1681,20 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 				neg = 1;
 			}
 			
-			is_valid_imm = VS_IsValidImmediate(new_line);
+			if(VS_LineContainsOperator(new_line+neg)){		
+				expr = VS_IsValidExpression(new_line, params->syntax);
+				
+				if(!expr){
+					return -17;
+				}
+				
+				expr = VS_EvaluateExpr(new_line, params->syntax);
+				sprintf(new_line,"%d",expr);
+				is_valid_imm = VS_IsValidImmediate(new_line, params);
+			}
+			else{
+				is_valid_imm = VS_IsValidImmediate(new_line, params);
+			}
 		
 			if(is_valid_imm == -1){
 				return -5;
@@ -1502,24 +1703,24 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 			   return -6;	
 			}
 			
-			start = (unsigned long)strtoul(new_line+neg, NULL, 0);
+			start = VS_ParseImmediateValue(new_line, params);
 			
 			if(neg){
-				signed int negative = -start;
+				signed int negative = start;
 				
 				*instruction = 15 << 26 | reg << 16 | ((negative >> 16) & 0xFFFF);
 				start = 9 << 26 | reg << 21 | reg << 16 | (negative & 0xFFFF);
 				
-				fwrite(instruction,4,1,file);
-				fwrite(&start,4,1,file);
+				VS_WriteInstruction(file,*instruction,params->endian);
+				VS_WriteInstruction(file,start,params->endian);
 			}
 			else{
 			
 				*instruction = 15 << 26 | reg << 16 | ((start >> 16) & 0xFFFF);
 				start = 9 << 26 | reg << 21 | reg << 16 | (start & 0xFFFF);
 				
-				fwrite(instruction,4,1,file);
-				fwrite(&start,4,1,file);
+				VS_WriteInstruction(file,*instruction,params->endian);
+				VS_WriteInstruction(file,start,params->endian);
 			}
 			
 			instruction_count++;
@@ -1532,7 +1733,7 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 			reg = VS_GetCopRegister(line + len,&size1);
 		}
 		else{
-			reg = VS_GetRegister(line + len, &size1);
+			reg = VS_GetRegister(line + len, &size1, params);
 		}
 
 		if(reg == -1){
@@ -1548,14 +1749,91 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 		char* rs = strstr(line,"(");
 		
 		if(rs == NULL){
-			return 0;
+			VS_TrimStrictLine(new_line, line + len + size1 + 1);
+			
+			if(VS_FindSymbol(new_line) && strcmp(op.name,"lwc2") != 0 && strcmp(op.name,"swc2") != 0 && strcmp(op.name,"lwc0") != 0 && strcmp(op.name,"swc0") != 0){
+				sym = VS_GetSymbol(new_line);
+				
+				start = sym.addr;
+			
+				if(OEXE && sym.type == VS_SYM_FUNC){
+					start += params->org;
+				}
+				
+				if(sym.type == VS_SYM_OBJ){
+					VS_AddRelocEntry((instruction_count << 2), VS_MIPS_HI_16, 0);
+					VS_AddRelocEntry((instruction_count + 1) << 2, VS_MIPS_LO_16, 0);
+					VS_AddPSYQRelocEntry(symbol_index, VS_PSYQ_HI_16, ((instruction_count - label_instruction_count) << 2), 3, start);
+					VS_AddPSYQRelocEntry(symbol_index, VS_PSYQ_LO_16, (((instruction_count + 1) - label_instruction_count) << 2), 3, start);
+				}
+				else{
+					VS_AddRelocEntry((instruction_count << 2), VS_MIPS_HI_16, 1);
+					VS_AddRelocEntry(((instruction_count + 1) << 2), VS_MIPS_LO_16, 1);
+					VS_AddPSYQRelocEntry(symbol_index, VS_PSYQ_HI_16, ((instruction_count - label_instruction_count) << 2), 2, start);
+					VS_AddPSYQRelocEntry(symbol_index, VS_PSYQ_LO_16, (((instruction_count + 1) - label_instruction_count) << 2), 2, start);
+				}
+				
+				end = 15 << 26 | 1 << 16 | ((start >> 16) & 0xFFFF);       /* lui */
+				
+				VS_WriteInstruction(file,end,params->endian);
+				
+				instruction_count++;
+				
+				atype.rt = 1;
+				atype.base = reg;
+				atype.offset = start;
+		
+				if(safe_load_delay && params->architecture != VS_MIPS_II_ARCH && params->architecture != VS_MIPS_PSP_ARCH){
+					if(!strcmp(op.name,"lw") || !strcmp(op.name,"lh") || !strcmp(op.name,"lhu") || !strcmp(op.name,"lbu") | !strcmp(op.name,"lb")
+						|| !strcmp(op.name,"lwc2")){
+						start = atype.op << 26 | atype.rt << 21 | atype.base << 16 | (atype.offset & 0xFFFF);
+						VS_WriteInstruction(file,start,params->endian);
+						VS_WriteNop(file);
+						instruction_count++;
+						return 2;
+					}
+				}
+				
+				*instruction = atype.op << 26 | atype.rt << 21 | atype.base << 16 | (atype.offset & 0xFFFF);
+				
+				return 1;
+			}
+			else if(VS_IsValidImmediate(new_line, params)){
+				start = VS_ParseImmediateValue(new_line, params);
+
+				end = 15 << 26 | 1 << 16 | ((start >> 16) & 0xFFFF);       /* lui */
+				
+				instruction_count++;
+				
+				VS_WriteInstruction(file,end,params->endian);
+				
+				atype.rt = 1;
+				atype.base = reg;
+				atype.offset = start;
+				
+				if(safe_load_delay && params->architecture != VS_MIPS_II_ARCH && params->architecture != VS_MIPS_PSP_ARCH){
+					if(!strcmp(op.name,"lw") || !strcmp(op.name,"lh") || !strcmp(op.name,"lhu") || !strcmp(op.name,"lbu") | !strcmp(op.name,"lb")
+						|| !strcmp(op.name,"lwc2")){
+						start = atype.op << 26 | atype.rt << 21 | atype.base << 16 | (atype.offset & 0xFFFF);
+						VS_WriteInstruction(file,start,params->endian);
+						VS_WriteNop(file);
+						instruction_count++;
+						return 2;
+					}
+				}
+				
+				*instruction = atype.op << 26 | atype.rt << 21 | atype.base << 16 | (atype.offset & 0xFFFF);
+				
+				return 1;
+			}
+			else return 0;
 		}
 		
 		if(strstr(line,")") == NULL){
 			return 0;
 		}
 		
-		reg = VS_GetRegister(rs + 1,&size1);
+		reg = VS_GetRegister(rs + 1,&size1, params);
 		
 		if(reg == -1){
 			return -2;
@@ -1571,7 +1849,7 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 		new_line[end-start] = '\0';
 		
 		if(end-start == 0){
-			if(syntax != VS_ASMPSX_SYNTAX && VS_GetNumberOfCommas(line) < 1){
+			if(params->syntax != VS_ASMPSX_SYNTAX && VS_GetNumberOfCommas(line) < 1){
 				return 0;
 			}
 		}
@@ -1580,30 +1858,51 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 			neg = 1;
 		}
 		
-		is_valid_imm = VS_IsValidImmediate(new_line);
+		is_valid_imm = VS_IsValidImmediate(new_line, params);
 		
-		if(is_valid_imm == -1){
-			return -5;
-		}
-		else if(is_valid_imm == -2){
-		   return -6;	
-		}
-			
-		if(neg){
-			atype.offset = (signed short)strtoul(new_line, NULL, 0);
-		}
-		else{
-			atype.offset = (unsigned short)strtoul(new_line, NULL, 0);
-		}
-	
+		atype.offset = VS_ParseImmediateValue(new_line, params);
 		atype.base = reg;
 		
-		if(safe_load_delay){
-			if(!strcmp(op.name,"lw") || !strcmp(op.name,"lh") || !strcmp(op.name,"lhu") || !strcmp(op.name,"lbu") | !strcmp(op.name,"lb")){
+		if(VS_FindSymbol(new_line) && is_valid_imm < 0){
+			sym = VS_GetSymbol(new_line);
+			atype.offset = sym.addr & 0xFFFF;
+		}
+		else if(VS_IsValidSymbolAddrOperator(new_line[0]) && VS_FindSymbol(new_line+1) && is_valid_imm < 0){
+			sym = VS_GetSymbol(new_line+1);
+			
+			if(new_line[0] == '>'){
+				atype.offset = (sym.addr >> 16) & 0xFFFF;
+			}
+			else{
+				atype.offset = sym.addr & 0xFFFF;
+			}
+		}
+		else if(VS_LineContainsOperator(new_line+neg)){		
+			expr = VS_IsValidExpression(new_line, params->syntax);
+			
+			if(!expr){
+				return -17;
+			}
+			
+			expr = VS_EvaluateExpr(new_line, params->syntax);
+			sprintf(new_line,"%d",expr);
+			is_valid_imm = VS_IsValidImmediate(new_line, params);
+		}
+		else{
+			if(is_valid_imm == -1){
+				return -5;
+			}
+			else if(is_valid_imm == -2){
+			   return -6;	
+			}
+		}
+		
+		if(safe_load_delay && params->architecture != VS_MIPS_II_ARCH && params->architecture != VS_MIPS_PSP_ARCH){
+			if(!strcmp(op.name,"lw") || !strcmp(op.name,"lh") || !strcmp(op.name,"lhu") || !strcmp(op.name,"lbu") | !strcmp(op.name,"lb")
+				|| !strcmp(op.name,"lwc2")){
 				start = atype.op << 26 | atype.base << 21 | atype.rt << 16 | (atype.offset & 0xFFFF);
-				fwrite(&start,4,1,file);
-				start = 0;
-				fwrite(&start,4,1,file);
+				VS_WriteInstruction(file,start,params->endian);
+				VS_WriteNop(file);
 				instruction_count++;
 				return 2;
 			}
@@ -1624,25 +1923,27 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 	return 1;
 }
 
-int VS_ParseMoveType(VS_OPCODE op, unsigned long* instruction, char* line){
+int VS_ParseMoveType(VS_OPCODE op, unsigned long* instruction, char* line, VS_ASM_PARAMS* params){
 	VS_MOVE_TYPE mtype;
 	unsigned long size1, num_commas;
-	int len;
+	int len, is_valid_prefix;
 	
 	len = strlen(op.name);
 	mtype.op = VS_Bin2Decimal(op.opcode);
 	
-	if(line[len] != '$' && syntax == VS_GNU_SYNTAX){
-		return -1;
+	is_valid_prefix = VS_IsValidRegisterPrefix(line,len,params->syntax);
+	
+	if(is_valid_prefix != 1){
+		return is_valid_prefix;
 	}
 	
 	num_commas = VS_GetNumberOfCommas(line);
 
-	if(num_commas >= 1){
+	if(num_commas){
 		return -12;
 	}
 	
-	mtype.rd = VS_GetRegister(line + len, &size1);
+	mtype.rd = VS_GetRegister(line + len, &size1, params);
 	
 	if(mtype.rd == -1){
 		return -2;
@@ -1662,7 +1963,7 @@ int VS_ParseMoveType(VS_OPCODE op, unsigned long* instruction, char* line){
 	return 1;
 }
 
-int VS_ParseCopType(VS_OPCODE op, unsigned long* instruction, char* line){
+int VS_ParseCopType(VS_OPCODE op, unsigned long* instruction, char* line, VS_ASM_PARAMS* params){
 	VS_COP_TYPE ctype;
 	unsigned long size1, size2, offset;
 	int len, is_valid_imm;
@@ -1673,7 +1974,7 @@ int VS_ParseCopType(VS_OPCODE op, unsigned long* instruction, char* line){
 	if(!strcmp(op.name,"cop2")){
 		char* cofunc = line + strlen("cop2");
 		
-		is_valid_imm = VS_IsValidImmediate(cofunc);
+		is_valid_imm = VS_IsValidImmediate(cofunc, params);
 		
 		if(is_valid_imm == -1){
 			return -5;
@@ -1693,11 +1994,11 @@ int VS_ParseCopType(VS_OPCODE op, unsigned long* instruction, char* line){
 		return 0;
 	}
 	
-	if(line[len] != '$' && syntax == VS_GNU_SYNTAX){
+	if(line[len] != '$' && params->syntax == VS_GNU_SYNTAX){
 		return -1;
 	}
 	
-	ctype.rt = VS_GetRegister(line + len, &size1);
+	ctype.rt = VS_GetRegister(line + len, &size1, params);
 	
 	if(ctype.rt == -1){
 		return -2;
@@ -1709,7 +2010,7 @@ int VS_ParseCopType(VS_OPCODE op, unsigned long* instruction, char* line){
 	
 	ctype.rd = VS_GetCopRegister(line + len + size1 + 1, &size2);
 	
-	if(line[len + size1 + 1] != '$' && syntax == VS_GNU_SYNTAX){
+	if(line[len + size1 + 1] != '$' && params->syntax == VS_GNU_SYNTAX){
 		return -1;
 	}
 	
@@ -1740,7 +2041,7 @@ int VS_ParseCopType(VS_OPCODE op, unsigned long* instruction, char* line){
 	return 1;
 }
 
-int VS_ParseFloatType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* file){
+int VS_ParseFloatType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* file, VS_ASM_PARAMS* params){
 	VS_R_TYPE rtype;
 	unsigned long instr, size1, size2, size3;
 	int len, reg, short_hand, is_valid_imm, is_valid_float, neg, offset;
@@ -1759,11 +2060,11 @@ int VS_ParseFloatType(VS_OPCODE op, unsigned long* instruction, char* line, FILE
 		return 1;
 	}
 	
-	if(line[len] != '$' && syntax == VS_GNU_SYNTAX){
+	if(line[len] != '$' && params->syntax == VS_GNU_SYNTAX){
 		return -1;
 	}
 	
-	rtype.rd = VS_GetFpRegister(line + len, &size1);
+	rtype.rd = VS_GetFpRegister(line + len, &size1, params);
 	
 	if(rtype.rd == -1){
 		return -2;
@@ -1771,16 +2072,16 @@ int VS_ParseFloatType(VS_OPCODE op, unsigned long* instruction, char* line, FILE
 	
 	if(rtype.rd == -2){
 		if(!strcmp(op.name,"cfc1")){
-			rtype.rd = VS_GetRegister(line + len, &size1);
+			rtype.rd = VS_GetRegister(line + len, &size1, params);
 		}
 		else if(!strcmp(op.name,"ctc1")){
-			rtype.rd = VS_GetRegister(line + len, &size1);
+			rtype.rd = VS_GetRegister(line + len, &size1, params);
 		}
 		else if(!strcmp(op.name,"mfc1")){
-			rtype.rd = VS_GetRegister(line + len, &size1);
+			rtype.rd = VS_GetRegister(line + len, &size1, params);
 		}
 		else if(!strcmp(op.name,"mtc1")){
-			rtype.rd = VS_GetRegister(line + len, &size1);
+			rtype.rd = VS_GetRegister(line + len, &size1, params);
 		}
 		else return -8;
 	}
@@ -1807,20 +2108,20 @@ int VS_ParseFloatType(VS_OPCODE op, unsigned long* instruction, char* line, FILE
 		memcpy(&size1,&fvalue,sizeof(fvalue));
 		
 		instr = 15 << 26 | 1 << 16 | ((size1 >> 16) & 0xFFFF); /* lui */
-		fwrite(&instr,4,1,file);
+		VS_WriteInstruction(file,instr,params->endian);
 		instr = 13 << 26 | 1 << 21 | 1 << 16 | (size1 & 0xFFFF); /* ori */
-		fwrite(&instr,4,1,file);
+		VS_WriteInstruction(file,instr,params->endian);
 		instr = VS_COP_1 << 26 | 4 << 21 | 1 << 16 | rtype.rd << 11; /* mtc1 */
-		fwrite(&instr,4,1,file);
+		VS_WriteInstruction(file,instr,params->endian);
 		instr = 0;                 /* nop */
-		fwrite(&instr,4,1,file);
+		VS_WriteInstruction(file,instr,params->endian);
 		
 		instruction += 3;
 		
 		return 2;
 	}
 	
-	rtype.rs = VS_GetFpRegister(line + len + size1 + 1, &size2);
+	rtype.rs = VS_GetFpRegister(line + len + size1 + 1, &size2, params);
 	
 	if(line[len + size1 + 1] != '$' && rtype.rs < 0){
 		if((!strcmp(op.name,"abs.s") || !strcmp(op.name,"sqrt.s") || !strcmp(op.name,"neg.s")) && VS_GetNumberOfCommas(line) == 0){
@@ -1839,7 +2140,7 @@ int VS_ParseFloatType(VS_OPCODE op, unsigned long* instruction, char* line, FILE
 				return 0;
 			}
 			
-			reg = VS_GetRegister(rs + 1,&size1);
+			reg = VS_GetRegister(rs + 1, &size1, params);
 			
 			if(reg == -1){
 				return -2;
@@ -1855,7 +2156,7 @@ int VS_ParseFloatType(VS_OPCODE op, unsigned long* instruction, char* line, FILE
 			new_line[end-start] = '\0';
 			
 			if(end-start == 0){
-				if(syntax != VS_ASMPSX_SYNTAX && VS_GetNumberOfCommas(line) < 1){
+				if(params->syntax != VS_ASMPSX_SYNTAX && VS_GetNumberOfCommas(line) < 1){
 					return 0;
 				}
 			}
@@ -1864,7 +2165,7 @@ int VS_ParseFloatType(VS_OPCODE op, unsigned long* instruction, char* line, FILE
 				neg = 1;
 			}
 		
-			is_valid_imm = VS_IsValidImmediate(new_line);
+			is_valid_imm = VS_IsValidImmediate(new_line, params);
 			
 			if(is_valid_imm == -1){
 				return -5;
@@ -1911,7 +2212,7 @@ int VS_ParseFloatType(VS_OPCODE op, unsigned long* instruction, char* line, FILE
 		return 1;
 	}
 	
-	rtype.rt = VS_GetFpRegister(line + len + size1 + 2 + size2, &size3);
+	rtype.rt = VS_GetFpRegister(line + len + size1 + 2 + size2, &size3, params);
 	
 	if(line[len + size1 + 2 + size2] != '$' && rtype.rt < 0){
 		if((!strcmp(op.name,"add.s") || !strcmp(op.name,"div.s") || !strcmp(op.name,"mul.s") || !strcmp(op.name,"sub.s")) && VS_GetNumberOfCommas(line) == 1){
@@ -1937,12 +2238,14 @@ int VS_ParseFloatType(VS_OPCODE op, unsigned long* instruction, char* line, FILE
 	return 1;
 }
 
-int VS_ParseVFPUType(VS_OPCODE op, unsigned long* instruction, char* line){
+int VS_ParseVFPUType(VS_OPCODE op, unsigned long* instruction, char* line, VS_ASM_PARAMS* params){
 	VS_VFPU_TYPE vtype;
 	unsigned long size1;
 	int len, size, is_valid_imm, neg, offset, num_commas;
 	char reg_str[5], cond_str[3], new_line[VS_MAX_LINE+1];
 	unsigned char cond;
+	
+	memset(&vtype,0x0,sizeof(VS_VFPU_TYPE));
 	
 	len = strlen(op.name);
 	neg = 0;
@@ -1977,7 +2280,7 @@ int VS_ParseVFPUType(VS_OPCODE op, unsigned long* instruction, char* line){
 		memcpy(reg_str,line+len+3,4);
 		reg_str[4] = '\0';
 		
-		VS_UnderlineLine(reg_str);
+		VS_LowercaseLine(reg_str);
 		
 		vtype.rd = VS_GetVFPURegister(reg_str, size);
 		
@@ -1988,7 +2291,7 @@ int VS_ParseVFPUType(VS_OPCODE op, unsigned long* instruction, char* line){
 		memcpy(reg_str,line+len+8,4);
 		reg_str[4] = '\0';
 		
-		VS_UnderlineLine(reg_str);
+		VS_LowercaseLine(reg_str);
 		
 		vtype.rs = VS_GetVFPURegister(reg_str, size);
 		
@@ -2017,7 +2320,7 @@ int VS_ParseVFPUType(VS_OPCODE op, unsigned long* instruction, char* line){
 	memcpy(reg_str,line+len,4);
 	reg_str[4] = '\0';
 	
-	VS_UnderlineLine(reg_str);
+	VS_LowercaseLine(reg_str);
 	
 	vtype.rd = VS_GetVFPURegister(reg_str, size);
 	
@@ -2037,7 +2340,7 @@ int VS_ParseVFPUType(VS_OPCODE op, unsigned long* instruction, char* line){
 			return 0;
 		}
 		
-		vtype.rs = VS_GetRegister(rs + 1,&size1);
+		vtype.rs = VS_GetRegister(rs + 1, &size1, params);
 		
 		if(vtype.rs == -1){
 			return -2;
@@ -2053,7 +2356,7 @@ int VS_ParseVFPUType(VS_OPCODE op, unsigned long* instruction, char* line){
 		new_line[end-start] = '\0';
 		
 		if(end-start == 0){
-			if(syntax != VS_ASMPSX_SYNTAX && VS_GetNumberOfCommas(line) < 1){
+			if(params->syntax != VS_ASMPSX_SYNTAX && VS_GetNumberOfCommas(line) < 1){
 				return 0;
 			}
 		}
@@ -2062,7 +2365,7 @@ int VS_ParseVFPUType(VS_OPCODE op, unsigned long* instruction, char* line){
 			neg = 1;
 		}
 	
-		is_valid_imm = VS_IsValidImmediate(new_line);
+		is_valid_imm = VS_IsValidImmediate(new_line, params);
 		
 		if(is_valid_imm == -1){
 			return -5;
@@ -2102,7 +2405,7 @@ int VS_ParseVFPUType(VS_OPCODE op, unsigned long* instruction, char* line){
 			return 60 + args;
 		}
 		
-		VS_UnderlineLine(reg_str);
+		VS_LowercaseLine(reg_str);
 		
 		if(args > 1){
 			vtype.rs = VS_GetVFPURegister(reg_str, size);
@@ -2128,7 +2431,7 @@ int VS_ParseVFPUType(VS_OPCODE op, unsigned long* instruction, char* line){
 			memcpy(reg_str,line+len+10,4);
 			reg_str[4] = '\0';
 			
-			VS_UnderlineLine(reg_str);
+			VS_LowercaseLine(reg_str);
 		
 			vtype.rt = VS_GetVFPURegister(reg_str, size);
 
@@ -2167,7 +2470,7 @@ int VS_ParseVFPUType(VS_OPCODE op, unsigned long* instruction, char* line){
 			return 60 + args;
 		}
 		
-		VS_UnderlineLine(reg_str);
+		VS_LowercaseLine(reg_str);
 		
 		if(args > 2){
 			vtype.rs = VS_GetVFPURegister(reg_str, size);
@@ -2180,7 +2483,7 @@ int VS_ParseVFPUType(VS_OPCODE op, unsigned long* instruction, char* line){
 				return -6;
 			}
 			
-			is_valid_imm = VS_IsValidImmediate(line + len + 10);
+			is_valid_imm = VS_IsValidImmediate(line + len + 10, params);
 	
 			if(is_valid_imm == -1){
 				return -5;
@@ -2215,7 +2518,7 @@ int VS_ParseVFPUType(VS_OPCODE op, unsigned long* instruction, char* line){
 				neg = 1;
 			}
 			
-			is_valid_imm = VS_IsValidImmediate(line + len + 5);
+			is_valid_imm = VS_IsValidImmediate(line + len + 5, params);
 		
 			if(is_valid_imm == -1){
 				return -5;
@@ -2255,7 +2558,8 @@ int VS_ParseVFPUType(VS_OPCODE op, unsigned long* instruction, char* line){
 int VS_ParseAssemblyFile(FILE* in, FILE* parse, VS_ASM_PARAMS* params){
 	FILE* text;
 	VS_OPCODE op;
-	unsigned long instruction;
+	unsigned long instruction, size;
+	unsigned long instruction_arr[VS_MAX_INSTRUCTION_READ], count;
 	int instr_index, dir, error, err, first_occurence, line_count = 0;
 	char line[VS_MAX_LINE+1];
 	char dest[VS_MAX_LINE+1];
@@ -2265,7 +2569,6 @@ int VS_ParseAssemblyFile(FILE* in, FILE* parse, VS_ASM_PARAMS* params){
 	arr[1] = "bal";
 	
 	OEXE = params->oexe;
-	org = params->org;
 	
 	text = fopen("textsec.dat","wb");
 	
@@ -2273,7 +2576,6 @@ int VS_ParseAssemblyFile(FILE* in, FILE* parse, VS_ASM_PARAMS* params){
 	safe_load_delay = 0;
 	symbol_index = -1;
 	label_instruction_count = 0;
-	syntax = params->syntax;
 	
 	while(VS_ReadLine(parse, line)){
 		line_count++;
@@ -2303,7 +2605,7 @@ int VS_ParseAssemblyFile(FILE* in, FILE* parse, VS_ASM_PARAMS* params){
 							VS_PrintErrorFromIncludeEntry(incerr,line_count);
 						}
 						else{
-							VS_PrintError(in,line,line_count);
+							VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 						}
 						
 						fclose(text);
@@ -2335,7 +2637,7 @@ int VS_ParseAssemblyFile(FILE* in, FILE* parse, VS_ASM_PARAMS* params){
 						VS_PrintErrorFromIncludeEntry(incerr,line_count);
 					}
 					else{
-						VS_PrintError(in,line,line_count);
+						VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 					}
 					
 					fclose(text);
@@ -2362,7 +2664,7 @@ int VS_ParseAssemblyFile(FILE* in, FILE* parse, VS_ASM_PARAMS* params){
 					VS_PrintErrorFromIncludeEntry(incerr,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 				
 				fclose(text);
@@ -2392,6 +2694,69 @@ int VS_ParseAssemblyFile(FILE* in, FILE* parse, VS_ASM_PARAMS* params){
 			safe_load_delay = 0;
 		}
 		
+		if(strstr(line,".inject") != NULL){
+			char* path =  strstr(line,".inject") + strlen(".inject");
+			char* end_quotes;
+			
+			if(!VS_VerifyPathSyntax(path,".inject",line_count)){
+				return -1;
+			}
+			
+			if(path[0] == '\"'){
+				end_quotes = strstr(path + 1,"\"");
+			}
+			else{
+				end_quotes = strstr(path + 1,"\'");
+			}
+			
+			size = end_quotes - path;
+				
+			if(size >= 1){
+				size = size - 1;
+			}
+			
+			strncpy(dest, path + 1, size);
+			
+			dest[size] = '\0';
+			
+			FILE* inc = fopen(dest,"rb");
+			
+			if(inc == NULL){
+				printf("Warning: The file path of the inject directive could not be found!\n");
+				
+				err = VS_ErrorOccuredInIncludeEntry(line_count);
+			
+				if(err != -1){
+					VS_PrintErrorFromIncludeEntry(err,line_count);
+				}
+				else{
+					printf("Line %d: %s\n",VS_GetActualLineCount(line_count),path);
+				}
+			}
+			else{
+				fseek(inc,0x0,SEEK_END);
+				size = ftell(inc);
+				fseek(inc,0x0,SEEK_SET);
+				
+				if(size % 4){
+					printf("Warning: The contents of %s have not been injected into the program. File size must be a multiple of four.\n",dest);
+				}
+				else{
+					size >>= 2;
+					
+					unsigned long i;
+					for(i = 0; i < size;){
+						count = fread(instruction_arr,4,VS_MAX_INSTRUCTION_READ,inc);
+						fwrite(instruction_arr,4,count,text);
+						i += count;
+					}
+					instruction_count += size;
+				}
+				
+				fclose(inc);
+			}
+		}
+		
 		if(instr_index != -1 && VS_LineContainsDirective(line) == -1 && strstr(line,":") == NULL){
 			VS_GetOpcodeFromIndex(&op,instr_index);
 			instruction = 0;
@@ -2399,7 +2764,7 @@ int VS_ParseAssemblyFile(FILE* in, FILE* parse, VS_ASM_PARAMS* params){
 			
 			//printf("name = %s\n",op.name);
 			//printf("line = %s\n",line);
-			
+
 			if(!(op.arch & params->architecture)){
 				printf("Error: %s architecture does not support the %s instruction\n",VS_GetArchitectureName(params->architecture), op.name);
 				
@@ -2409,7 +2774,7 @@ int VS_ParseAssemblyFile(FILE* in, FILE* parse, VS_ASM_PARAMS* params){
 					VS_PrintErrorFromIncludeEntry(incerr,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 				
 				fclose(text);
@@ -2418,38 +2783,38 @@ int VS_ParseAssemblyFile(FILE* in, FILE* parse, VS_ASM_PARAMS* params){
 
 			switch(op.itype){
 				case VS_R_INSTRUCTION:{
-					error = VS_ParseRType(op,&instruction,line,text);
+					error = VS_ParseRType(op,&instruction,line,text,params);
 				}break;
 				case VS_I_INSTRUCTION:{
-					error = VS_ParseIType(op,&instruction,line,text);
+					error = VS_ParseIType(op,&instruction,line,text,params);
 				}break;
 				case VS_J_INSTRUCTION:{
-					error = VS_ParseJType(op,&instruction,line,text);
+					error = VS_ParseJType(op,&instruction,line,text,params);
 				}break;
 				case VS_B_INSTRUCTION:{
-					error = VS_ParseBType(op,&instruction,line,text);
+					error = VS_ParseBType(op,&instruction,line,text,params);
 				}break;
 				case VS_ADDR_INSTRUCTION:{
-					error = VS_ParseAddrType(op,&instruction,line,text);
+					error = VS_ParseAddrType(op,&instruction,line,text,params);
 				}break;
 				case VS_MOVE_INSTRUCTION:{
-					error = VS_ParseMoveType(op,&instruction,line);
+					error = VS_ParseMoveType(op,&instruction,line,params);
 				}break;
 				case VS_COP_INSTRUCTION:{
-					error = VS_ParseCopType(op,&instruction,line);
+					error = VS_ParseCopType(op,&instruction,line,params);
 				}break;
 				case VS_FLOAT_INSTRUCTION:{
-					error = VS_ParseFloatType(op,&instruction,line,text);
+					error = VS_ParseFloatType(op,&instruction,line,text,params);
 				}break;
 				case VS_VFPU_INSTRUCTION: break;
+				case VS_COND_INSTRUCTION: break;
 			}
 			
 			if(op.itype & VS_VFPU_INSTRUCTION){
-				error = VS_ParseVFPUType(op,&instruction,line);
+				error = VS_ParseVFPUType(op,&instruction,line,params);
 			}
 			
 			instruction_count++;
-			
 		
 			if(error == -10){
 				printf("Syntax Error: instruction '%s' requires one argument in the form '%s reg1, arg1'\n",op.name,op.name);
@@ -2457,22 +2822,45 @@ int VS_ParseAssemblyFile(FILE* in, FILE* parse, VS_ASM_PARAMS* params){
 			else if(error == -12){
 				printf("Syntax Error: instruction '%s' requires one destination register in the form '%s reg1'\n",op.name,op.name);
 			}
-
+			else if(error == 5){
+				if(!params->nowarnings){
+					printf("Warning: instruction '%s' handles 16-bit immediate values. Truncating value to 16-bits.\n",op.name);
+				}
+			}
 			else if(error >= 60){
 				printf("Syntax Error: instruction '%s' requires %d registers\n",op.name,error-60);
 			}
 			else if(error != 1 && error != 2){
-				VS_PrintErrorString(error);
+				if(params->nowarnings){
+					if(error != 3 && error != 4){
+						VS_PrintErrorString(error);
+					}
+				}
+				else{
+					VS_PrintErrorString(error);
+				}
 			}
 			
 			if(error <= 0 || error >= 60){
 				int incerr = VS_ErrorOccuredInIncludeEntry(line_count);
 				
-				if(incerr != -1){
-					VS_PrintErrorFromIncludeEntry(incerr,line_count);
+				if(params->nowarnings){
+					if(error != 3 && error != 4){
+						if(incerr != -1){
+							VS_PrintErrorFromIncludeEntry(incerr,line_count);
+						}
+						else{
+							VS_PrintError(in,line,VS_GetActualLineCount(line_count));
+						}
+					}
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					if(incerr != -1){
+						VS_PrintErrorFromIncludeEntry(incerr,line_count);
+					}
+					else{
+						VS_PrintError(in,line,VS_GetActualLineCount(line_count));
+					}
 				}
 				
 				fclose(text);
@@ -2484,7 +2872,7 @@ int VS_ParseAssemblyFile(FILE* in, FILE* parse, VS_ASM_PARAMS* params){
 			//printf("line = %s\n",line);
 			
 			if(error != 2)
-				fwrite(&instruction,4,1,text);
+				VS_WriteInstruction(text,instruction,params->endian);
 		}
 	}
 	

@@ -8,9 +8,11 @@ set(SOURCES
 		source/vs_symtable.c 
         source/vs_preprocessor.c 
 		source/vs_parser.c 
+		source/vs_exp_parser.c
 		source/vs_elf.c
 		source/vs_psyqobj.c
 		source/vs_psexe.c 
+		source/vs_cpe.c
 		source/vs_utils.c
 		source/vs_asm.c
 )

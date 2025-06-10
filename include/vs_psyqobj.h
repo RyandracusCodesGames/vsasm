@@ -10,8 +10,8 @@
 *
 *   File: vs_psyqobj.h
 *   Date: 5/25/2025
-*   Version: 1.0
-*   Updated: 6/1/2025
+*   Version: 1.1
+*   Updated: 6/6/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
@@ -42,6 +42,7 @@ typedef enum VS_PSYQ_RELOC_TYPE{
 	VS_PSYQ_HI_16 = 82,
 	VS_PSYQ_LO_16 = 84,
 	VS_PSYQ_26    = 74,
+	VS_PSYQ_PC16  = 30,
 }VS_PSYQ_RELOC_TYPE;
 
 typedef struct VS_PSYQ_RELOC{
@@ -50,18 +51,20 @@ typedef struct VS_PSYQ_RELOC{
 	unsigned short reloc_offset;
 	unsigned short section_num;
 	unsigned long dest_symbol_addr;
+	unsigned long undefined;
 }VS_PSYQ_RELOC;
 
 void VS_InitPSYQRelocTable();
 void VS_SetPSYQRelocTrue();
 void VS_AddPSYQRelocEntry(unsigned long index, unsigned char reloc_type, unsigned short offset, unsigned short section_number, unsigned short dest_symbol_addr);
+void VS_AddUndefinedPSYQRelocEntry(unsigned long index, unsigned char reloc_type, unsigned short offset, unsigned short section_number, unsigned short dest_symbol_addr);
 void VS_PrintPSYQRelocTable();
 void VS_WritePSYQHeader(FILE* file, VS_PSYQ_HEADER header);
 void VS_WritePSYQSectionHeader(FILE* file, VS_PSYQ_SECTION_HEADER header);
 void VS_SwitchSection(FILE* file, unsigned short section);
 void VS_WriteCodeCmd(FILE* file, unsigned short size);
 void VS_WriteSLDInfoCmd(FILE* file, unsigned short offset);
-void VS_WriteSymbol(FILE* file, VS_PSYQ_SYMBOL symbol);
+void VS_WritePSYQSymbol(FILE* file, VS_PSYQ_SYMBOL symbol, int und);
 void VS_WritePSYQObj(char* filename);
 
 #endif

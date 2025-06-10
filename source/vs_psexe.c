@@ -1,5 +1,4 @@
 #include <vs_psexe.h>
-#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <vs_elf.h>
@@ -11,11 +10,26 @@
 *
 *   File: vs_psexe.c
 *   Date: 5/3/2025
-*   Version: 1.0
-*   Updated: 6/1/2025
+*   Version: 1.1
+*   Updated: 6/7/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
+
+void VS_WritePSEXEHeader(FILE* file, VS_PSEXE psexe){
+	fwrite(&psexe,1,16,file);
+	fwrite(&psexe.pc,4,1,file);
+	fwrite(&psexe.gp,4,1,file);
+	fwrite(&psexe.ram_dest_addr,4,1,file);
+	fwrite(&psexe.file_size,4,1,file);
+	fwrite(&psexe.unknown_1,4,1,file);
+	fwrite(&psexe.unknown_2,4,1,file);
+	fwrite(&psexe.mem_fill_start_addr,4,1,file);
+	fwrite(&psexe.mem_fill_size,4,1,file);
+	fwrite(&psexe.init_sp_base,4,1,file);
+	fwrite(&psexe.init_sp_offset,4,1,file);
+	fwrite(&psexe.reserved,1,20,file);
+}
 
 void VS_WritePSEXE(char* filename, unsigned long org, int output){
 	FILE* file, *textsec, *datasec;
@@ -59,18 +73,7 @@ void VS_WritePSEXE(char* filename, unsigned long org, int output){
 	
 	file = fopen(name,"wb");
 	
-	fwrite(&psexe,1,16,file);
-	fwrite(&psexe.pc,4,1,file);
-	fwrite(&psexe.gp,4,1,file);
-	fwrite(&psexe.ram_dest_addr,4,1,file);
-	fwrite(&psexe.file_size,4,1,file);
-	fwrite(&psexe.unknown_1,4,1,file);
-	fwrite(&psexe.unknown_2,4,1,file);
-	fwrite(&psexe.mem_fill_start_addr,4,1,file);
-	fwrite(&psexe.mem_fill_size,4,1,file);
-	fwrite(&psexe.init_sp_base,4,1,file);
-	fwrite(&psexe.init_sp_offset,4,1,file);
-	fwrite(&psexe.reserved,1,20,file);
+	VS_WritePSEXEHeader(file,psexe);
 	
 	fseek(file,0x800,SEEK_SET);
 	
@@ -111,7 +114,7 @@ void VS_WritePSEXE(char* filename, unsigned long org, int output){
 	file_size = ftell(file);
 	VS_AlignOffset(file,&file_size,0x800);
 	fseek(file,28,SEEK_SET);
-	psexe.file_size = file_size;
+	psexe.file_size = file_size - 0x800;
 	fwrite(&psexe.file_size,4,1,file);
 	
 	fclose(file);

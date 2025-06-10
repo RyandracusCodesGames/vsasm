@@ -11,8 +11,8 @@
 *
 *   File: vs_elf.c
 *   Date: 4/30/2025
-*   Version: 1.0
-*   Updated: 6/1/2025
+*   Version: 1.1
+*   Updated: 6/10/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
@@ -42,6 +42,14 @@ void VS_AddRelocEntry(unsigned long offset, unsigned long reloc_type, int is_jum
 			reloc_table[reloc_size].r_info = VS_ELF32_R_INFO(2,reloc_type);
 		}
 		
+		reloc_size++;
+	}
+}
+
+void VS_AddUndefinedRelocEntry(unsigned long offset, unsigned long reloc_type, int index){
+	if(reloc_size < VS_MAX_RELOCS){
+		reloc_table[reloc_size].r_offset = offset;
+		reloc_table[reloc_size].r_info = VS_ELF32_R_INFO(index,reloc_type);
 		reloc_size++;
 	}
 }
@@ -342,7 +350,15 @@ int VS_WriteELF(char* filename, VS_ASM_PARAMS params){
 		offset = string_offset;
 
 		fwrite(&offset,4,1,file);
-		fwrite(&sym.addr,4,1,file);
+		
+		if(sym.type == VS_SYM_UND){
+			sym.addr = 0;
+			fwrite(&sym.addr,4,1,file);
+		}
+		else{
+			fwrite(&sym.addr,4,1,file);
+		}
+		
 		fwrite(&sym.size,4,1,file);
 		
 		string_offset += strlen(sym.name) + 1;
@@ -356,6 +372,9 @@ int VS_WriteELF(char* filename, VS_ASM_PARAMS params){
 		
 		if(sym.type == VS_SYM_FUNC){
 			hword = 1;
+		}
+		else if(sym.type == VS_SYM_UND){
+			hword = 0;
 		}
 		else{
 			if(elf_contains_reloc){

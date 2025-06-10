@@ -10,8 +10,8 @@
 *
 *   File: vs_symtable.c
 *   Date: 4/23/2025
-*   Version: 1.0
-*   Updated: 6/1/2025
+*   Version: 1.1
+*   Updated: 6/9/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
@@ -35,7 +35,7 @@ int VS_AddSymbol(char* name, unsigned long instruction_count, unsigned long size
 		sym_table.symbols[table_size].size = size;
 		sym_table.symbols[table_size].type = type;
 		sym_table.symbols[table_size].scope = scope;
-		
+		sym_table.symbols[table_size].string_table_index = table_size;
 		sym_table.size++;
 	}
 	
@@ -162,6 +162,17 @@ unsigned long VS_GetSymbolAddr(unsigned long index){
 		return sym_table.symbols[index].addr;
 	}
 	else return 0;
+}
+
+int VS_LineContainsSymbol(char* line){
+	int i, size = VS_GetSymbolTableSize();
+	for(i = 0; i < size; i++){
+		if(strstr(line,sym_table.symbols[i].name) != NULL){
+			return i;
+		}
+	}
+	
+	return -1;
 }
 
 void VS_PrintSymbolTable(){

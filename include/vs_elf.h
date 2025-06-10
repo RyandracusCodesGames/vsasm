@@ -11,11 +11,13 @@
 *
 *   File: vs_elf.h
 *   Date: 4/30/2025
-*   Version: 1.0
-*   Updated: 6/1/2025
+*   Version: 1.1
+*   Updated: 6/6/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
+
+#include <vs_utils.h>
 
 #define VS_MAX_RELOCS 4096
 
@@ -90,6 +92,7 @@ void VS_WriteSectionHeader(FILE* file, VS_SECTION_HEADER sh);
 void VS_InitRelocTable();
 void VS_SetRelocTrue();
 void VS_AddRelocEntry(unsigned long offset, unsigned long reloc_type, int is_jump);
+void VS_AddUndefinedRelocEntry(unsigned long offset, unsigned long reloc_type, int index);
 void VS_PrintRelocTable();
 
 #endif

@@ -5,6 +5,7 @@
 #include <vs_opcode.h>
 #include <vs_symtable.h>
 #include <vs_parser.h>
+#include <vs_exp_parser.h>
 
 /********************************************
 *   VideoStation Assembler
@@ -13,8 +14,8 @@
 *
 *   File: vs_parser.c
 *   Date: 4/23/2025
-*   Version: 1.0
-*   Updated: 6/1/2025
+*   Version: 1.1
+*   Updated: 6/10/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
@@ -22,31 +23,40 @@
 extern VS_OPCODE vs_opcode_table[];
 extern VS_SYM_TABLE sym_table;
 
+int nowarnings;
+
 VS_MACRO_TABLE macro_table;
 
 char* reserved_words[] = {
-	"add","addu","addi","addiu","and","andi","b","beq","beqz","bgez","bgtz","ble","blez","blt","bltz","bne",
-	"bnez","cfc2","ctc2","div","divu","j","jal","jalr","jr","la","li","lb","lbu","lh","lhu","lui","lw","lwc2",
-	"lwl","lwr","mfc2","mfhi","mthi","mflo","mtlo","mtc2","mul","mult","multu","move","nor","nop","xor","or",
-	"ori","sb","sh","sw","slt","slti","sltiu","sltu","sll","srl","sra","sub","subu","$0","$1","$2","$3","$4",
-	"$zero","$at","$sp","$ra","$gp","$k1","$k2","$5","$6","$7","$8","$9","$10","$11","$12","$13","$14","$15",
-	"$16","$17","$18","$19","$20","$21","$22","$23","$24","$25","$26","$27","$28","$29","$30","$31","$t0","$t1",
-	"$t2","$t3","$t4","$t5","$t6","$t7","$t8","$t9","$v0","$v1","$a0","$a1","$a2","$a3","$s0","$s1","$s2","$s3",
-	"$s4","$s5","$s6","$s7","text",".text","data",".data","ktext",".ktext","globl",".globl","global",".global",
-	".word","word",".byte","byte",".half","half","type",".type","section",".section","bss",".bss","@function",
-	"include",".include","@object", ".align", ".incbin",".incasm",".ascii",".empty",".org",".arch",".float",
-	".syntax",".undefsym",
+	"$zero","$at","$sp","$ra","$gp","$k1","$k2","$t0","$t1","$t2","$t3","$t4","$t5","$t6","$t7","$t8","$t9","$v0",
+	"$v1","$a0","$a1","$a2","$a3","$s0","$s1","$s2", "$s3","$s4","$s5","$s6","$s7","$f0","$f1","$f2","$f3","$f4","$f5",
+	"$f6","$f7","$f8","$f9","$f10","$f11","$f12","$f13","$f14","$f15","$f16","$f17","$f18","$f19","$f20","$f21","$f22",
+	"$f23","$f24","$f25","$f26","$f27","$f28","$f29","$f30","$f31","r0","r1","r2","r3","r4","r5","r6","r7","r8","r9",
+	"r10","r11","r12","r13","r14","r15","r16","r18","r19","r20","r21","r22","r23","r24","r25","r26","r27","r28","r29",
+	"r30","r31","zero","at","sp","ra","gp","k1","k2","t0","t1","t2","t3","t4","t5","t6","t7","t8","t9","v0","v1","a0",
+	"a1","a2","a3","s0","s1","s2","s3","s4","s5","s6","s7","f0","f1","f2","f3","f4","f5","f6","f7","f8","f9","f10","f11",
+	"f12","f13","f14","f15","f16","f17","f18","f19","f20","f21","f22","f23","f24","f25","f26","f27","f28","f29","f30",
+	"f31",".text",".data",".ktext",".globl",".global", ".word",".byte",".half",".dw",".dh",".db",".arch",".float",".syntax",
+	".undefsym",".type",".section",".bss",".include", ".align", ".incbin",".incasm",".ascii",".empty",".safeloaddelay",
+	".safeloadoff",".org","equ","equr","set",".inject",
 };
 
 char* directives[] = {
 	".text",".data",".ktext",".globl",".global", ".word",".byte",".half",".dw",".dh",".db",".arch",".float",".syntax",".undefsym",
-	".type",".section",".bss",".include", ".align", ".incbin",".incasm",".ascii",".empty",".safeloaddelay",".safeloadoff",".org"
+	".type",".section",".bss",".include", ".align", ".incbin",".incasm",".ascii",".empty",".safeloaddelay",".safeloadoff",".org",
+	".inject",
 };
 
 int VS_StringIsReservedWord(char* name){
-	int i, num_reserved_words = sizeof(reserved_words) / sizeof(reserved_words[0]);
+	int i, num_reserved_words = sizeof(reserved_words) / sizeof(reserved_words[0]), size = VS_GetNumberOfInstructions();
 	for(i = 0; i < num_reserved_words; i++){
 		if(!strcmp(name,reserved_words[i])){
+			return 1;
+		}
+	}
+	
+	for(i = 0; i < size; i++){
+		if(!strcmp(name,vs_opcode_table[i].name)){
 			return 1;
 		}
 	}
@@ -55,13 +65,23 @@ int VS_StringIsReservedWord(char* name){
 }
 
 int VS_MacroIsReservedWord(char* name, char* value){
-	int i, num_reserved_words = sizeof(reserved_words) / sizeof(reserved_words[0]);
+	int i, num_reserved_words = sizeof(reserved_words) / sizeof(reserved_words[0]), size = VS_GetNumberOfInstructions();
 	for(i = 0; i < num_reserved_words; i++){
 		if(!strcmp(name,reserved_words[i])){
 			return 1;
 		}
 		
 		if(!strcmp(value,reserved_words[i])){
+			return 1;
+		}
+	}
+	
+	for(i = 0; i < size; i++){
+		if(!strcmp(name,vs_opcode_table[i].name)){
+			return 1;
+		}
+		
+		if(!strcmp(value,vs_opcode_table[i].name)){
 			return 1;
 		}
 	}
@@ -92,6 +112,12 @@ void VS_AddMacro(char* name, char* value){
 		
 		macro_table.size++;
 	}
+	else{
+		if(!nowarnings){
+			printf("Warning: Macro not added. Macro name or value is a reserved word.\n");
+			printf("Attempted macro addition name and value pair (%s,%s)\n\n",name,value);
+		}
+	}
 }
 
 void VS_AddRegMacro(char* name, char* value){
@@ -116,6 +142,12 @@ void VS_AddRegMacro(char* name, char* value){
 		
 		macro_table.size++;
 	}
+	else{
+		if(!nowarnings){
+			printf("Warning: Macro not added. Macro name is a reserved word or the value is not a valid register value.\n");
+			printf("Attempted macro addition name and register pair (%s,%s)\n\n",name,value);
+		}
+	}
 }
 
 void VS_AddSetMacro(char* name, char* value){
@@ -139,6 +171,12 @@ void VS_AddSetMacro(char* name, char* value){
 		strcpy(macro_table.macro[size].value, value);
 		
 		macro_table.size++;
+	}
+	else{
+		if(!nowarnings){
+			printf("Warning: Macro not added. Macro name or value is a reserved word.\n");
+			printf("Attempted macro addition name and value pair (%s,%s)\n\n",name,value);
+		}
 	}
 }
 
@@ -231,15 +269,32 @@ void VS_TrimLine(char* dest, char* src){
 }
 
 void VS_TrimStrictLine(char* dest, const char* src){
-	int i, index = 0, size = 0, len = strlen(src);
+	int i, size = 0, len = strlen(src);
 	for(i = 0; i < len; i++){
 		if(src[i] != ' ' && src[i] != '\r' && src[i] != '\n' && src[i] != '\t' && src[i] != 13 && src[i] != '\v'){
 			dest[size++] = src[i];
-			index = i;
 		}
 	}
 	
-	dest[index+1] = '\0';
+	dest[size] = '\0';
+}
+
+void VS_TrimCommentFromLine(char* dest){
+	char cpy[VS_MAX_LINE+1], c;
+	
+	strcpy(cpy,dest);
+	
+	int i, size = 0, len = strlen(dest);
+	for(i = 0; i < len; i++){
+		c = cpy[i];
+		if(c == '#' || c == ';'){
+			break;
+		}
+			
+		dest[size++] = c;
+	}
+	
+	dest[size] = '\0';
 }
 
 int VS_GetFirstOccurenceIndex(char* str, char c){
@@ -326,13 +381,13 @@ int VS_StrictIsStringBlank(const char* line){
 	return 1;
 }
 
-int VS_LineContainsInstruction(const char* line, VS_ASM_PARAMS* params){
+int VS_LineContainsInstruction(char* line, VS_ASM_PARAMS* params){
 	int i, j, ind = 0, size = VS_GetNumberOfInstructions();
-	char instruction[12], reg[3];
+	char instruction[12], reg[3], bypass = 0;
 	
 	for(i = 0; i < 10; i++){
 		if(params->syntax == VS_GNU_SYNTAX){
-			if(line[i] == '$' || line[i] == '\n'){
+			if(line[i] == '$' || line[i] == '\n' || line[i] == ','){
 				break;
 			}
 		}
@@ -341,50 +396,32 @@ int VS_LineContainsInstruction(const char* line, VS_ASM_PARAMS* params){
 			reg[2] = '\0';
 			
 			if(line[0] == 'v' && params->architecture == VS_MIPS_PSP_ARCH){
-				VS_UnderlineLine(line);
 				memcpy(instruction,line,10);
 				instruction[11] = '\0';
 				ind = 11;
 				break;
 			}
-		
-			if(line[0] != 's' && line[i] == 'l' && line[i+1] == 'a'){
-				instruction[0] = 'l';instruction[1] = 'a';
+			
+			if(!strncasecmp(line,"la",2)){
+				instruction[0] = 'l'; instruction[1] = 'a';
 				ind = 1;
 				break;
 			}
 			
-			if(line[i] == 'n' && line[i+1] == 'o' && line[i+2] == 'r'){
-				instruction[0] = 'n';instruction[1] = 'o';instruction[2] = 'r';
-				ind = 2;
-				break;
-			}
-			
-			if(line[i] == 'o' && line[i+1] == 'r' && line[i+2] != 'i'){
-				instruction[0] = 'o';instruction[1] = 'r';
+			if((line[0] == 's' || line[0] == 'l') && !strncasecmp(line+1,"wra",3) && !isdigit(line[4])){
+				instruction[0] = tolower(line[0]); instruction[1] = 'w';
 				ind = 1;
 				break;
 			}
 			
-			if(line[i] == 's' && line[i+1] == 'r' && line[i+2] == 'a'){
-				instruction[0] = 's';instruction[1] = 'r';instruction[2] = 'a';
-				ind = 2;
-				break;
-			}
-			
-			if(line[i] == 'j' && line[i+1] == 'a' && line[i+2] == 'l' && line[i+3] != 'r'){
-				instruction[0] = 'j';instruction[1] = 'a';instruction[2] = 'l';
-				ind = 2;
-				break;
-			}
-			
-			if(line[i] == 's' && line[i+1] == 'r' && line[i+2] == 'a' && line[i+3] == 'v'){
-				instruction[0] = 's';instruction[1] = 'r';instruction[2] = 'a';instruction[3] = 'v';
+			if(tolower(line[i]) == 'r' &&  tolower(line[i+1]) == 'a'){
+				VS_LowercaseAndCopyLine(instruction,line,3);
 				ind = 3;
+				bypass = 1;
 				break;
 			}
-			
-			if((VS_LineContainsRegister(reg)) || line[i] == '\n' || line[i] == '$'){
+
+			if((VS_LineContainsRegister(reg)) || line[i] == '\n' || line[i] == '$' || line[i] == ','){
 				break;
 			}
 		}
@@ -409,7 +446,7 @@ int VS_LineContainsInstruction(const char* line, VS_ASM_PARAMS* params){
 	}
 	
 	if(strstr(instruction,"cop2") != NULL || strstr(instruction,"syscall") != NULL || strstr(instruction,"bal") || strstr(instruction,"jal") 
-		|| instruction[0] == 'b' || instruction[0] == 'j' || params->architecture == VS_MIPS_PSP_ARCH){
+		|| instruction[0] == 'b' || instruction[0] == 'j' || params->architecture == VS_MIPS_PSP_ARCH || bypass){
 			
 		for(i = ind; i >= 0; i--){
 			instruction[i] = '\0';
@@ -425,47 +462,44 @@ int VS_LineContainsInstruction(const char* line, VS_ASM_PARAMS* params){
 	return -1;
 }
 
-int VS_LLineContainsInstruction(const char* line){
-	int i, index = -1, ind = 0, size = VS_GetNumberOfInstructions();
-	char instruction[9];
+void VS_PasteSymbolNames(int has_sym, char* line, char* dest, char* name){
+	VS_SYM sym;
+	int size;
 	
-	for(i = 0; i < 8; i++){
-		if(line[i] == '$' || line[i] == '\n'){
-			break;
-		}
+	memcpy(dest, line, VS_MAX_LINE);
+
+	while(has_sym != -1){
+		sym = VS_GetSymbolFromIndex(has_sym);
 		
-		instruction[i] = tolower(line[i]);
-		ind = i;
-	}
-	
-	instruction[ind+1] = '\0';
+		char* sym_name = sym.name;
+		
+		//printf("sym_name = %s\n",sym_name);
+		
+		size = (int)(strstr(dest,sym_name) - dest);
+		
+		strncpy(name, dest, size);
+		name[size] = '\0';
 
-	for(i = 0; i < size; i++){
-		if(strstr(instruction,vs_opcode_table[i].name) != NULL){
-			index = i;
-			break;
-		}
-	}
+		//printf("name = %s\n",name);
+		//printf("value = %ld\n",sym.addr);
+		
+		char* after = strstr(dest,sym_name) + strlen(sym_name);
+		
+		strncpy(dest, after, strlen(after));
+		dest[strlen(after)] = '\0';
 
-	if(index == -1){	
-		return -1;
+		//printf("after = %s\n",dest);
+
+		sprintf(name,"%s0x%lx%s",name,sym.addr,dest);
+		
+		//printf("name = %s\n",name);
+		
+		VS_TrimStrictLine(dest,name);
+	
+		has_sym = VS_LineContainsSymbol(dest);
 	}
 	
-	if(!strcmp(instruction,vs_opcode_table[index].name)){
-		return index;
-	}
-	
-	if(strstr(instruction,"cop2") != NULL || strstr(instruction,"syscall") != NULL || strstr(instruction,"bal")
-		|| strstr(instruction,"jal") || instruction[0] == 'b' || instruction[0] == 'j'){
-		if(instruction[0] == 'b' && instruction[1] != 'a' && instruction[2] != 'l'){
-			return VS_GetOpcode("b"); 
-		}
-		else if(instruction[0] == 'j' && instruction[1] != 'a' && instruction[2] != 'l'){
-			return VS_GetOpcode("j"); 
-		}
-		else return index;
-	}
-	else return -1;
+	memcpy(line, dest, VS_MAX_LINE);
 }
 
 int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params){
@@ -478,8 +512,10 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 	char line[VS_MAX_LINE+1];
 	char dest[VS_MAX_LINE+1];
 	char name[VS_MAX_LINE+1];
+	char imm_str[256];
 	unsigned char zero = 0;
 	unsigned char binarr[500];
+	VS_SYM sym;
 	VS_SYM_TYPE type;
 	VS_SYM_SCOPE scope;
 	
@@ -490,6 +526,8 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 	line_start = 0;
 	line_end = 0;
 	prev_instruction_count = 0;
+	dat = NULL;
+	nowarnings = params->nowarnings;
 	
 	/* BEGIN PREPROCESSING BY SEARCHING FOR AND REMOVING COMMENTS ( '#' OR ';' SYMBOLS) */
 	/* BEGIN SEARCHING FOR .INCLUDE DIRECTIVES AND REPLACING MACROS WITH THEIR SET VALUES */
@@ -533,169 +571,85 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 			char trim[VS_MAX_LINE];
 	
 			VS_PrintAndStoreTrimmedLine(preprocess,dest,name);
-			
-			char* token = strstr(name,"equr");
+
 			char* include_dir = strstr(name,".include");
-			
-			if(token != NULL && strstr(name,"equal") == NULL){
-				char* value = token + strlen("equr");
-				memset(dest,'\0',VS_MAX_LINE);
-				memcpy(dest,name,(int)(token - name));
-				VS_AddRegMacro(dest,value);
-			}
-			
-			token = strstr(name,"equ");
-			
-			if(token != NULL && strstr(name,"equal") == NULL && strstr(name,"equr") == NULL){
-				char* value = token + strlen("equ");
-				memset(dest,'\0',VS_MAX_LINE);
-				memcpy(dest,name,(int)(token - name));
-				VS_AddMacro(dest,value);
-			}
-			
-			token = strstr(name,"set");
-			
-			if(token != NULL && VS_LineContainsInstruction(name,params) == -1 && strstr(name,":") == NULL && VS_LineContainsDirective(name) == -1){
-				char* value = token + strlen("set");
-				memset(dest,'\0',VS_MAX_LINE);
-				memcpy(dest,name,(int)(token - name));
-				VS_AddSetMacro(dest,value);
-			}
-			
+		
 			//printf("include_dir = %s\n",include_dir);
-			
+
 			if(include_dir != NULL){
 				char* path =  include_dir + strlen(".include");
 			//	printf("path = %s\n",path);
 				
-				if(path[0] != '\'' && path[0] != '\"'){
-					printf("Syntax Error: The file path of an include directive must be encased in double quotes or single quotes\n");
-					printf("Line %d: %s\n",line_count,path);
+				if(!VS_VerifyPathSyntax(path,".include",line_count)){
 					return -1;
 				}
+				
+				if(path[0] == '\"'){
+					end_quotes = strstr(path + 1,"\"");
+				}
 				else{
-					if(path[0] == '\"'){
-						end_quotes = strstr(path + 1,"\"");
-						
-						if(end_quotes == NULL){
-							printf("Syntax Error: The file path of an include directive must be encased in double quotes or single quotes\n");
-							printf("Line %d: %s\n",line_count,path);
-							return -1;
-						}
+					end_quotes = strstr(path + 1,"\'");
+				}
+				
+				size = end_quotes - path;
+				
+				if(size >= 1){
+					size = size - 1;
+				}
+				
+				strncpy(dest, path + 1, size);
+				
+				dest[size] = '\0';
+				
+			//	printf("dest = %s\n",dest);
+				
+				inc = fopen(dest,"rb");
+				
+				if(inc == NULL){
+					printf("Warning: The file path of the include directive could not be found!\n");
+					printf("Line %d: %s\n",line_count,dest);
+				}
+				else{
+					if(line_end == 0){
+						line_start = line_count + line_end;
 					}
 					else{
-						end_quotes = strstr(path + 1,"\'");
-						
-						if(end_quotes == NULL){
-							printf("Syntax Error: The file path of an include directive must be encased in double quotes or single quotes\n");
-							printf("Line %d: %s\n",line_count,path);
-							return -1;
-						}
+						line_start = line_end + 1;
 					}
 					
-					size = end_quotes - path;
+					line_end = line_start;
 					
-					if(size >= 1){
-						size = size - 1;
-					}
-					
-					strncpy(dest, path + 1, size);
-					
-					dest[size] = '\0';
-					
-				//	printf("dest = %s\n",dest);
-					
-					inc = fopen(dest,"rb");
-					
-					if(inc == NULL){
-						printf("Warning: The file path of the include directive could not be found!\n");
-						printf("Line %d: %s\n",line_count,dest);
-					}
-					else{
-						if(line_end == 0){
-							line_start = line_count + line_end;
-						}
-						else{
-							line_start = line_end + 1;
-						}
+					incindex = VS_AddIncludeEntry(dest,line_start,line_end);
+	
+					while(VS_ReadLine(inc, dest)){
+						memset(trim,0x0,VS_MAX_LINE);
+						VS_TrimStrictLine(trim,dest);
 						
-						line_end = line_start;
+						//printf("Line = %s\n",trim);
 						
-						incindex = VS_AddIncludeEntry(dest,line_start,line_end);
-						
-						while(VS_ReadLine(inc, dest)){
-							memset(trim,0x0,VS_MAX_LINE);
-							VS_TrimLine(trim,dest);
+						if(strstr(trim, ".include") != NULL){
+							char* incdir = strstr(trim,".include") + strlen(".include");
 							
-							//printf("Line = %s\n",trim);
+							int errorcode = VS_GrabMacrosFromIncludeEntry(incdir,incindex,line_count);
 							
-							token = strstr(trim,"equr");
-							
-							if(token != NULL){
-								memset(name,0x0,VS_MAX_LINE);
-								strncpy(name,trim,VS_GetFirstOccurenceIndex(trim,'e'));
-								char* value = token + strlen("equr");
-								
-							//	printf("Name = %s\n",name);
-							//	printf("Token = %s\n",value);
-								
-								VS_AddRegMacro(name,value);
-								
-								fprintf(preprocess,"\n");
-								line_end++;
-							}
-							else if(strstr(trim,"equ") != NULL && strstr(line,"equr") == NULL){
-								token = strstr(trim,"equ");
-								
-								char* value = token + strlen("equ");
-								memset(name,'\0',VS_MAX_LINE);
-								memcpy(name,trim,(int)(token - trim));
-								
-								//printf("Name = %s\n",name);
-								//printf("Token = %s\n",value);
-								
-								VS_AddMacro(name,value);
-								
-								fprintf(preprocess,"\n");
-								line_end++;
-							}
-							else if(strstr(trim,"set") != NULL && VS_LineContainsInstruction(line,params) == -1 && strstr(line,":") == NULL && VS_LineContainsDirective(line) == -1){
-								token = strstr(trim,"set");
-								
-								char* value = token + strlen("set");
-								memset(name,'\0',VS_MAX_LINE);
-								memcpy(name,trim,(int)(token - trim));
-								
-								//printf("Name = %s\n",name);
-								//printf("Token = %s\n",value);
-								
-								VS_AddSetMacro(name,value);
-								
-								fprintf(preprocess,"\n");
-								line_end++;
-							}
-							else if(strstr(dest, ".include") != NULL){
-								char* incdir = strstr(trim,".include") + strlen(".include");
-								
-								int errorcode = VS_GrabMacrosFromIncludeEntry(incdir,incindex,line_count, params);
-								
-								if(errorcode == -1){
-									return -1;
-								}
-								
-								fprintf(preprocess,"\n");
-								line_end++;
-							}
-							else if(!VS_IsStringBlank(dest) && dest != NULL && dest[0] != '\n'){
-								line_end++;
-								VS_PrintAndStoreTrimmedLine(preprocess,dest,trim);
+							if(errorcode == -1){
+								return -1;
 							}
 						}
+			
+						line_end++;
 						
-						VS_UpdateIncludeEntry(incindex,line_start,line_end);
+						if(strstr(dest,"#") != NULL || strstr(dest,";") != NULL){
+							VS_TrimCommentFromLine(dest);
+						}
 						
-						fclose(inc);
+						VS_PrintAndStoreTrimmedLine(preprocess,dest,trim);
+						
 					}
+					
+					VS_UpdateIncludeEntry(incindex,line_start,line_end);
+					
+					fclose(inc);
 				}
 			}
 		}
@@ -729,33 +683,57 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 	pre = fopen("preprocessor.i","wb+");
 	
 	while(VS_ReadLine(preprocess,line)){
+		VS_TrimStrictLine(name,line);
+		
 		char* include_dir = strstr(line,".include");
-		char* equ = strstr(line,"equ");
+		char* equ = strstr(name,"equr");
+		char* tok = strstr(name,"equ");
 		
 		if(include_dir == NULL){
 			macro_index = VS_LineContainsMacro(line);
 			
-			if(equ != NULL){
+			if(equ != NULL && strstr(line,"equal") == NULL){
+				char* value = equ + strlen("equr");
+				memset(dest,'\0',VS_MAX_LINE);
+				memcpy(dest,name,(int)(equ - name));
+				VS_AddRegMacro(dest,value);
+				VS_SortMacroTable();
 				fprintf(pre,"\n");
 			}
-			else if(strstr(line,"set") != NULL && VS_LineContainsInstruction(line,params) != -1 && VS_LineContainsDirective(line) != -1 && strstr(name,":") == NULL){
+			else if(tok != NULL && strstr(line,"equal") == NULL){
+				char* value = tok + strlen("equ");
+				memset(dest,'\0',VS_MAX_LINE);
+				memcpy(dest,name,(int)(tok - name));
+				VS_AddMacro(dest,value);
+				VS_SortMacroTable();
 				fprintf(pre,"\n");
 			}
-			else{
+			else if(strstr(line,"set") != NULL && VS_LineContainsInstruction(line,params) == -1 && VS_LineContainsDirective(line) == -1 && strstr(line,":") == NULL){
+				char* token = strstr(line,"set");
+				char* value = token + strlen("set");
+				memset(dest,'\0',VS_MAX_LINE);
+				memcpy(dest,line,(int)(token - line));
+				VS_AddSetMacro(dest,value);
+				VS_SortMacroTable();
+				fprintf(pre,"\n");
+			}
+			else if(VS_LineContainsDirective(line) != -1 || strstr(line,":") != NULL){
+				fprintf(pre,"%s",line);
+			}
+			else{			
 				if(macro_index != -1){
 					memcpy(dest, line, VS_MAX_LINE);
 					
 					while(macro_index != -1){
 						char* macro_name = macro_table.macro[macro_index].name;
 						
+					//	printf("macro_name = %s\n",macro_name);
+						
 						size = (int)(strstr(dest,macro_name) - dest);
 						
 						strncpy(name, dest, size);
 						name[size] = '\0';
-						
-						VS_PrintStrictTrimmedLine(pre,name);
-						VS_PrintStrictTrimmedLine(pre,macro_table.macro[macro_index].value);
-						
+
 					//	printf("name = %s\n",name);
 					//	printf("value = %s\n",macro_table.macro[macro_index].value);
 						
@@ -763,19 +741,26 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 						
 						strncpy(dest, after, strlen(after));
 						dest[strlen(after)] = '\0';
+				
+					//	printf("after = %s\n",dest);
 						
+						strcat(name,macro_table.macro[macro_index].value);
+						strcat(name,dest);
+						
+						VS_TrimStrictLine(dest,name);
+					
 						macro_index = VS_LineContainsMacro(dest);
 						
-						if(macro_index == -1)
-							VS_PrintStrictTrimmedLine(pre,dest);
-						
-						macro_index = VS_LineContainsMacro(dest);
+						if(macro_index == -1){
+							fprintf(pre,"%s",dest);
+						}
 					}
 					
 					fprintf(pre,"\n");
 				}
 				else{
-					fprintf(pre,"%s",line);
+					VS_PrintStrictTrimmedLine(pre,line);
+					fprintf(pre,"\n");
 				}
 			}
 		}
@@ -785,6 +770,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 	}
 	
 	memset(dest,0x0,VS_MAX_LINE);
+	memset(line,0x0,VS_MAX_LINE);
 	fseek(pre,0x0,SEEK_SET);
 	
 	while(VS_ReadLine(pre, line)){
@@ -817,6 +803,10 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 			safe_load_delay = 0;
 		}
 		
+		if(strstr(line,".undefsym")){
+			params->undefsym = 1;
+		}
+		
 		if(strstr(line,".arch") != NULL){
 			char* directive = strstr(line,".arch") + strlen(".arch");
 			
@@ -829,11 +819,14 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 			else if(strstr(directive,"psx") != NULL){
 				params->architecture = VS_MIPS_PSX_ARCH;
 			}
+			else if(strstr(directive,"ps1") != NULL){
+				params->architecture = VS_MIPS_PSX_ARCH;
+			}
 			else if(strstr(directive,"psp") != NULL){
 				params->architecture = VS_MIPS_PSP_ARCH;
 			}
 			else{
-				printf("Warning: Unrecognized architecture. Must be set to mips1, mips2, psx, or psp\n");
+				printf("Warning: Unrecognized architecture. Must be set to mips1, mips2, psx, ps1, or psp\n");
 				
 				int err = VS_ErrorOccuredInIncludeEntry(line_count);
 				
@@ -867,6 +860,489 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					VS_PrintError(in,line,line_count);
 				}
 			}
+		}
+		
+		if(strstr(line,".inject") != NULL){
+			char* path =  strstr(line,".inject") + strlen(".inject");
+			char* end_quotes;
+			
+			if(!VS_VerifyPathSyntax(path,".inject",line_count)){
+				fclose(pre);
+	
+				if(has_data_section)
+					fclose(dat);
+				
+				return -1;
+			}
+			
+			if(path[0] == '\"'){
+				end_quotes = strstr(path + 1,"\"");
+			}
+			else{
+				end_quotes = strstr(path + 1,"\'");
+			}
+			
+			size = end_quotes - path;
+				
+			if(size >= 1){
+				size = size - 1;
+			}
+			
+			strncpy(dest, path + 1, size);
+			
+			dest[size] = '\0';
+			
+			inc = fopen(dest,"rb");
+			
+			if(inc == NULL){
+				printf("Warning: The file path of the inject directive could not be found!\n");
+				
+				int err = VS_ErrorOccuredInIncludeEntry(line_count);
+			
+				if(err != -1){
+					VS_PrintErrorFromIncludeEntry(err,line_count);
+				}
+				else{
+					printf("Line %d: %s\n",line_count,path);
+				}
+			}
+			else{
+				fseek(inc,0x0,SEEK_END);
+				size = ftell(inc);
+				fseek(inc,0x0,SEEK_SET);
+				
+				if(size % 4){
+					printf("Warning: The contents of %s have not been injected into the program. File size must be a multiple of four.\n",dest);
+				}
+				else{
+					instruction_count += (size >> 2);
+				}
+				
+				fclose(inc);
+			}
+		}
+		
+		if(strstr(line,".type") != NULL){
+			char* str = strstr(line,",");
+			
+			if(str == NULL){
+				printf("Syntax Error: .type directive must contain a comma followed by a value '.type, <value>'\n");
+				
+				int err = VS_ErrorOccuredInIncludeEntry(line_count);
+				
+				if(err != -1){
+					VS_PrintErrorFromIncludeEntry(err,line_count);
+				}
+				else{
+					VS_PrintError(in,line,line_count);
+				}
+				
+				fclose(pre);
+				
+				if(has_data_section){
+					fclose(dat);
+				}
+				
+				return -1;
+			}
+			
+			if(strstr(line,"@function") != NULL){
+				type = VS_SYM_FUNC;
+			}
+			else if(strstr(line,"@object") != NULL){
+				type = VS_SYM_OBJ;
+			}
+			else{
+				printf("Syntax Error: .type directive can only be set to @function or @object '.type <func>, @function' or '.type <object>, @object\n");
+				
+				int err = VS_ErrorOccuredInIncludeEntry(line_count);
+				
+				if(err != -1){
+					VS_PrintErrorFromIncludeEntry(err,line_count);
+				}
+				else{
+					VS_PrintError(in,line,line_count);
+				}
+				
+				fclose(pre);
+				
+				if(has_data_section){
+					fclose(dat);
+				}
+				
+				return -1;
+			}
+		}
+		
+		if(strstr(line,".size") != NULL){
+			char* size_str = strstr(line,".size");
+			char* str = strstr(size_str,",");;
+			
+			if(str == NULL){
+				printf("Syntax Error: .size directive must contain a comma followed by a value '.size, <value>'\n");
+				
+				int err = VS_ErrorOccuredInIncludeEntry(line_count);
+				
+				if(err != -1){
+					VS_PrintErrorFromIncludeEntry(err,line_count);
+				}
+				else{
+					VS_PrintError(in,line,line_count);
+				}
+				
+				fclose(pre);
+				
+				if(has_data_section){
+					fclose(dat);
+				}
+				
+				return -1;
+			}
+			else{
+				char* num = str + 1;
+				int result;
+				
+				if(num[0] == '0' && num[1] == 'x'){
+					result = VS_HexDFA(num);
+				}
+				else{
+					result = VS_IntDFA(num);
+				}
+				
+				if(!result){
+					printf("Syntax Error: .size directive must have a valid immediate value\n");
+					
+					int err = VS_ErrorOccuredInIncludeEntry(line_count);
+				
+					if(err != -1){
+						VS_PrintErrorFromIncludeEntry(err,line_count);
+					}
+					else{
+						VS_PrintError(in,line,line_count);
+					}
+					
+					fclose(pre);
+					
+					if(has_data_section){
+						fclose(dat);
+					}
+				
+					return -1;
+				}
+				
+				size = (int)strtoul(num, NULL, 0);
+			}
+		}
+		
+		if(strstr(line,".org") != NULL){
+			char* org_str = strstr(line,".org");
+
+			char* num = org_str + strlen(".org");
+			int result;
+			
+			if(num[0] == '0' && num[1] == 'x'){
+				result = VS_HexDFA(num);
+			}
+			else{
+				result = VS_IntDFA(num);
+			}
+			
+			if(!result){
+				printf("Syntax Error: .org directive must have a valid immediate value\n");
+				
+				int err = VS_ErrorOccuredInIncludeEntry(line_count);
+				
+				if(err != -1){
+					VS_PrintErrorFromIncludeEntry(err,line_count);
+				}
+				else{
+					VS_PrintError(in,line,line_count);
+				}
+				
+				fclose(pre);
+				
+				if(has_data_section){
+					fclose(dat);
+				}
+			
+				return -1;
+			}
+			
+			params->org = (int)strtoul(num, NULL, 0);
+			params->org = (((params->org) + ((4)-1)) & ~((4)-1));
+		}
+		
+		if(instr_index != -1 && strstr(line,":") == NULL && dir == -1){
+			VS_OPCODE op;
+			VS_GetOpcodeFromIndex(&op,instr_index);
+			
+			if(op.itype == VS_ADDR_INSTRUCTION && strcmp(op.name,"la") != 0 && strcmp(op.name,"li") != 0  && strcmp(op.name,"cache") != 0){
+				if(strstr(line,"(") == NULL){
+					instruction_count++;
+				}
+			}
+			
+			if(safe_load_delay){
+				if(((!strcmp(op.name,"lw") || !strcmp(op.name,"lh") || !strcmp(op.name,"lhu") || !strcmp(op.name,"lbu") | !strcmp(op.name,"lb")) 
+					&& params->architecture != VS_MIPS_II_ARCH && params->architecture != VS_MIPS_PSP_ARCH) || op.itype == VS_B_INSTRUCTION || 
+				!strcmp(op.name,"jr") || !strcmp(op.name,"jalr") || op.itype == VS_J_INSTRUCTION){
+					instruction_count++;
+				}
+			}
+			
+			if(!strcmp(op.name,"li") && strstr(line,",") != NULL){
+				char* immediate = strstr(line,",") + 1;
+				int neg = 0;
+				int is_valid_imm;
+				
+				if(immediate[0] == '-'){
+					immediate++;
+					neg = 1;
+				}
+					
+				if(VS_LineContainsOperator(immediate)){
+					int expr;
+					
+					VS_InitExprParser();
+
+					expr = VS_IsValidExpression(immediate, params->syntax);
+					
+					if(expr){
+						expr = VS_EvaluateExpr(immediate, params->syntax);
+						sprintf(immediate,"%d",expr);
+					}
+				}
+		
+				is_valid_imm = VS_IsValidImmediate(immediate, params);
+
+				if(is_valid_imm != 1 && is_valid_imm != 2){
+					instruction_count++;
+				}
+				else{
+					if(neg){
+						signed int imm;
+						
+						if(params->syntax == VS_ASMPSX_SYNTAX && immediate[0] == '$'){
+							memset(imm_str,'\0',256);
+							imm_str[0] = '-'; imm_str[1] = '0'; imm_str[2] = 'x';
+							imm = (signed int)strtol(strcat(imm_str,immediate+1), NULL, 0);
+						}
+						else{
+							imm = (signed int)strtol(immediate, NULL, 0);
+						}
+						
+						imm = -imm;
+						
+						if(imm <= -32678 || imm >= 32767){
+							instruction_count++;
+						}
+					}
+					else{
+						unsigned long imm;
+						
+						if(params->syntax == VS_ASMPSX_SYNTAX && immediate[0] == '$'){
+							memset(imm_str,'\0',256);
+							imm_str[0] = '0'; imm_str[1] = 'x';
+							imm = (unsigned int)strtoul(strcat(imm_str,immediate+1), NULL, 0);
+						}
+						else{
+							imm = (unsigned int)strtoul(immediate, NULL, 0);
+						}
+						
+
+						if(imm >= 65536){
+							instruction_count++;
+						}
+					}
+				}
+			}
+			
+			if((op.itype == VS_I_INSTRUCTION && strcmp(op.name,"lui") != 0 && strcmp(op.name,"nop") != 0)){
+
+				if(VS_GetCharCountInLine(line,',') == 2){
+					char* fchar = line + VS_GetFirstOccurenceIndex(line,',') + 1;
+					int findex = VS_GetFirstOccurenceIndex(fchar,',') + 1, neg = 0;
+					memcpy(dest, fchar + findex, strlen(fchar) - findex);
+					dest[strlen(fchar) - findex] = '\0';
+					
+					if(dest[0] == '-'){
+						neg = 1;
+					}
+					
+					if(neg){
+						signed int imm;
+						
+						if(params->syntax == VS_ASMPSX_SYNTAX && dest[1] == '$'){
+							memset(imm_str,'\0',256);
+							imm_str[0] = '0'; imm_str[1] = 'x';
+							imm = (signed int)strtoul(strcat(imm_str,dest+2), NULL, 0);
+						}
+						else{
+							imm = (signed int)strtol(dest, NULL, 0);
+						}
+						
+						imm = -imm;
+						
+						if(imm <= -32678 || imm >= 32767){
+							instruction_count += 2;
+						}
+					}
+					else{
+						unsigned long integer;
+						
+						if(params->syntax == VS_ASMPSX_SYNTAX && dest[0] == '$'){
+							memset(imm_str,'\0',256);
+							imm_str[0] = '0'; imm_str[1] = 'x';
+							integer = (unsigned int)strtoul(strcat(imm_str,dest+1), NULL, 0);
+						}
+						else{
+							integer = (unsigned long)strtoul(dest, NULL, 0);
+						}
+
+						if(integer >= 65536){
+							instruction_count += 2;
+						}
+					}
+				}
+				else{
+					int findex = VS_GetFirstOccurenceIndex(line,',') + 1, neg = 0;
+					memcpy(dest, line + findex, strlen(line) - findex);
+					dest[strlen(line) - findex] = '\0';
+					
+					if(dest[0] == '-'){
+						neg = 1;
+					}
+					
+					if(neg){
+						signed int imm;
+						
+						if(params->syntax == VS_ASMPSX_SYNTAX && dest[1] == '$'){
+							memset(imm_str,'\0',256);
+							imm_str[0] = '0'; imm_str[1] = 'x';
+							imm = (signed int)strtoul(strcat(imm_str,dest+2), NULL, 0);
+						}
+						else{
+							imm = (signed int)strtol(dest, NULL, 0);
+						}
+						
+						imm = -imm;
+						
+						if(imm <= -32678 || imm >= 32767){
+							instruction_count += 2;
+						}
+					}
+					else{
+						unsigned long integer;
+						
+						if(params->syntax == VS_ASMPSX_SYNTAX && dest[0] == '$'){
+							memset(imm_str,'\0',256);
+							imm_str[0] = '0'; imm_str[1] = 'x';
+							integer = (unsigned int)strtoul(strcat(imm_str,dest+1), NULL, 0);
+						}
+						else{
+							integer = (unsigned long)strtoul(dest, NULL, 0);
+						}
+
+						if(integer >= 65536){
+							instruction_count += 2;
+						}
+					}
+				}
+			}
+			
+			if(op.itype == VS_B_INSTRUCTION && op.optype == VS_PSEUDO_OPCODE && strcmp(op.name,"beqz") != 0 && strcmp(op.name,"beqzl") != 0 
+			&& strcmp(op.name,"bnez") != 0 && strcmp(op.name,"bnezl") != 0 && strcmp(op.name,"b") != 0){
+				instruction_count++;
+			}
+			
+			if(!strcmp(op.name,"la")  || !strcmp(op.name,"mul") || !strcmp(op.name,"umul")){
+				instruction_count++;
+			}
+			
+			if(!strcmp(op.name,"li.s")){
+				instruction_count += 3;
+			}
+			
+			instruction_count++;
+		}
+		else if(instr_index == -1 && strstr(line,":") == NULL && dir == -1 && strlen(line) > 1){
+			char* string = strstr(line,"jal");
+			
+			if(string != NULL){
+				instruction_count++;
+			}
+			else if(line[0] == 'b' || line[0] == 'j'){
+				instruction_count++;
+			}
+		}
+		
+		char* label = strstr(line,":");
+		
+		if(label != NULL){
+			first_occurence = VS_GetFirstOccurenceIndex(line,':');
+			memcpy(dest,line,first_occurence);
+			dest[first_occurence] = '\0';
+			
+			if(VS_FindSymbol(dest)){
+				printf("Error: The label '%s' is already defined!\n",dest);
+				
+				int err = VS_ErrorOccuredInIncludeEntry(line_count);
+				
+				if(err != -1){
+					VS_PrintErrorFromIncludeEntry(err,line_count);
+				}
+				else{
+					VS_PrintError(in,line,line_count);
+				}
+				
+				fclose(pre);
+				
+				if(has_data_section){
+					fclose(dat);
+				}
+				
+				return -1;
+			}
+			else{
+				if(type == VS_SYM_FUNC){
+					index = VS_GetIndexOfLastFuncSymbol();
+					num_of_instructions = instruction_count - prev_instruction_count;
+					prev_instruction_count = instruction_count;
+					VS_UpdateNumberOfInstructions(index,num_of_instructions);
+					VS_AddSymbol(dest,instruction_count,size,type,scope);
+					scope = VS_SCOPE_LOCAL;
+					size = 0;
+				}
+			}
+		}
+	}
+	
+	memset(dest,0x0,VS_MAX_LINE);
+	memset(line,0x0,VS_MAX_LINE);
+	fseek(pre,0x0,SEEK_SET);
+	line_count = 0;
+	
+	if(params->oexe){
+		data_offset = params->org + (instruction_count << 2);
+	}
+	
+	while(VS_ReadLine(pre, line)){
+		line_count++;
+		
+		if(strstr(line,".globl") != NULL){
+			scope = VS_SCOPE_GLOBAL;
+		}
+		
+		if(strstr(line,".global") != NULL){
+			scope = VS_SCOPE_GLOBAL;
+		}
+		
+		if(strstr(line,".data") != NULL){
+			type = VS_SYM_OBJ;
+		}
+		
+		if(strstr(line,".text") != NULL){
+			type = VS_SYM_FUNC;
 		}
 		
 		char* align = strstr(line,".align");
@@ -1221,166 +1697,6 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 			}
 		}
 		
-		if(strstr(line,".org") != NULL){
-			char* org_str = strstr(line,".org");
-
-			char* num = org_str + strlen(".org");
-			int result;
-			
-			if(num[0] == '0' && num[1] == 'x'){
-				result = VS_HexDFA(num);
-			}
-			else{
-				result = VS_IntDFA(num);
-			}
-			
-			if(!result){
-				printf("Syntax Error: .org directive must have a valid immediate value\n");
-				
-				int err = VS_ErrorOccuredInIncludeEntry(line_count);
-				
-				if(err != -1){
-					VS_PrintErrorFromIncludeEntry(err,line_count);
-				}
-				else{
-					VS_PrintError(in,line,line_count);
-				}
-				
-				fclose(pre);
-				
-				if(has_data_section){
-					fclose(dat);
-				}
-			
-				return -1;
-			}
-			
-			params->org = (int)strtoul(num, NULL, 0);
-			params->org = (((params->org) + ((4)-1)) & ~((4)-1));
-		}
-		
-		if(instr_index != -1 && strstr(line,":") == NULL && dir == -1){
-			VS_OPCODE op;
-			VS_GetOpcodeFromIndex(&op,instr_index);
-			
-			if(safe_load_delay){
-				if(!strcmp(op.name,"lw") || !strcmp(op.name,"lh") || !strcmp(op.name,"lhu") || !strcmp(op.name,"lbu") | !strcmp(op.name,"lb") ||
-				op.itype == VS_B_INSTRUCTION || op.itype == VS_COP_INSTRUCTION || !strcmp(op.name,"jr") || !strcmp(op.name,"jalr") || op.itype == VS_J_INSTRUCTION){
-					instruction_count++;
-				}
-			}
-			
-			if(!strcmp(op.name,"li") && strstr(line,",") != NULL){
-				char* immediate = strstr(line,",") + 1;
-				int neg = 0;
-				
-				if(immediate[0] == '-'){
-					immediate++;
-					neg = 1;
-				}
-				
-				if(!VS_HexDFA(immediate) && !VS_IntDFA(immediate)){
-					instruction_count++;
-				}
-				else{
-					if(neg){
-						signed int imm = (signed int)strtol(immediate, NULL, 0);
-						imm = -imm;
-						
-						if(imm <= -32678 || imm >= 32767){
-							instruction_count++;
-						}
-					}
-					else{
-						unsigned long imm = (unsigned int)strtoul(immediate, NULL, 0);
-
-						if(imm >= 65536){
-							instruction_count++;
-						}
-					}
-				}
-			}
-			
-			if((op.itype == VS_I_INSTRUCTION && strcmp(op.name,"lui") != 0 && strcmp(op.name,"nop") != 0)){
-
-				if(VS_GetCharCountInLine(line,',') == 2){
-					char* fchar = line + VS_GetFirstOccurenceIndex(line,',') + 1;
-					int findex = VS_GetFirstOccurenceIndex(fchar,',') + 1, neg = 0;
-					memcpy(dest, fchar + findex, strlen(fchar) - findex);
-					dest[strlen(fchar) - findex] = '\0';
-					
-					if(dest[0] == '-'){
-						neg = 1;
-					}
-					
-					if(neg){
-						signed int imm = (signed int)strtol(dest, NULL, 0);
-						imm = -imm;
-						
-						if(imm <= -32678 || imm >= 32767){
-							instruction_count += 2;
-						}
-					}
-					else{
-						unsigned long integer = (unsigned long)strtoul(dest, NULL, 0);
-
-						if(integer >= 65536){
-							instruction_count += 2;
-						}
-					}
-				}
-				else{
-					int findex = VS_GetFirstOccurenceIndex(line,',') + 1, neg = 0;
-					memcpy(dest, line + findex, strlen(line) - findex);
-					dest[strlen(line) - findex] = '\0';
-					
-					if(dest[0] == '-'){
-						neg = 1;
-					}
-					
-					if(neg){
-						signed int imm = (signed int)strtol(dest, NULL, 0);
-						imm = -imm;
-						
-						if(imm <= -32678 || imm >= 32767){
-							instruction_count += 2;
-						}
-					}
-					else{
-						unsigned long integer = (unsigned long)strtoul(dest, NULL, 0);
-
-						if(integer >= 65536){
-							instruction_count += 2;
-						}
-					}
-				}
-			}
-			
-			if(op.itype == VS_B_INSTRUCTION && op.optype == VS_PSEUDO_OPCODE && strcmp(op.name,"beqz") != 0 && strcmp(op.name,"bnez") != 0 && strcmp(op.name,"b") != 0){
-				instruction_count++;
-			}
-			
-			if(!strcmp(op.name,"la")  || !strcmp(op.name,"mul") || !strcmp(op.name,"umul")){
-				instruction_count++;
-			}
-			
-			if(!strcmp(op.name,"li.s")){
-				instruction_count += 3;
-			}
-			
-			instruction_count++;
-		}
-		else if(instr_index == -1 && strstr(line,":") == NULL && dir == -1 && strlen(line) > 1){
-			char* string = strstr(line,"jal");
-			
-			if(string != NULL){
-				instruction_count++;
-			}
-			else if(line[0] == 'b' || line[0] == 'j'){
-				instruction_count++;
-			}
-		}
-		
 		char* label = strstr(line,":");
 		
 		if(label != NULL){
@@ -1388,7 +1704,9 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 			memcpy(dest,line,first_occurence);
 			dest[first_occurence] = '\0';
 			
-			if(VS_FindSymbol(dest)){
+			sym = VS_GetSymbol(dest);
+			
+			if(VS_FindSymbol(dest) && sym.type == VS_SYM_OBJ){
 				printf("Error: The label '%s' is already defined!\n",dest);
 				
 				int err = VS_ErrorOccuredInIncludeEntry(line_count);
@@ -1409,32 +1727,28 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 				return -1;
 			}
 			else{
-				if(type == VS_SYM_FUNC){
-					index = VS_GetIndexOfLastFuncSymbol();
-					num_of_instructions = instruction_count - prev_instruction_count;
-					prev_instruction_count = instruction_count;
-					VS_UpdateNumberOfInstructions(index,num_of_instructions);
-					VS_AddSymbol(dest,instruction_count,size,type,scope);
-				}
-				else{
+				if(type == VS_SYM_OBJ){
 					data_index = VS_AddDataSymbol(dest,data_offset,instruction_count,size,type,scope);
 					data_size = 0;
+					scope = VS_SCOPE_LOCAL;
 				}
-				
-				scope = VS_SCOPE_LOCAL;
-				size = 0;
 			}
 		}
 		
-		if(strstr(line,".word") != NULL || strstr(line,".dw") != NULL ){
+		if(strstr(line,".word") != NULL || strstr(line,".dw") != NULL){
+			int has_sym = VS_LineContainsSymbol(line);
+			
+			if(has_sym != -1){
+				VS_PasteSymbolNames(has_sym,line,dest,name);
+			}
+			
 			if(strstr(line,",")){
 				char* arr;
-				
 				if(strstr(line,".word") != NULL){
 					arr = strstr(line,".word") + 5;
 				}
 				else{
-					arr = strstr(line,".db") + 3;
+					arr = strstr(line,".dw") + 3;
 				}
 				
 				int num_of_commas = VS_GetNumberOfCommas(arr) + 1, len = strlen(arr);
@@ -1455,27 +1769,77 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 				//	printf("count = %d\n",count);
 					
 					memcpy(dest, arr + old_count, count - old_count);
-					dest[count-old_count] = '\0';
+					
+					if(count-old_count-1 > 0){
+						if(dest[count-old_count-1] == ','){
+							dest[count-old_count-1] = '\0';
+						}
+						else{
+							dest[count-old_count] = '\0';
+						}
+					}
+					else{
+						dest[count-old_count] = '\0';
+					}
+					
+					int neg = 0;
+					if(dest[0] == '-'){
+						neg = 1;
+					}
+					
+					if(VS_LineContainsOperator(dest+neg)){
+						int expr;
+						
+						VS_InitExprParser();
+
+						expr = VS_IsValidExpression(dest, params->syntax);
+						
+						if(expr){
+							expr = VS_EvaluateExpr(dest, params->syntax);
+							sprintf(dest,"%d",expr);
+						}
+					}
 					
 					data_offset += 4;
 					data_size += 4;
 				
-					int num = (unsigned long)strtoul(dest, NULL, 0);
+					int num = VS_ParseImmediateValue(dest, params);
+				
 					//printf("dest = %s\n",dest);
 					fwrite(&num,4,1,dat);
 				}
 			}
 			else{
+				char* arr;
+				if(strstr(line,".word") != NULL){
+					arr = strstr(line,".word") + 5;
+				}
+				else{
+					arr = strstr(line,".dw") + 3;
+				}
+				
+				int neg = 0;
+				if(arr[0] == '-'){
+					neg = 1;
+				}
+				
+				if(VS_LineContainsOperator(arr+neg)){
+					int expr;
+					
+					VS_InitExprParser();
+
+					expr = VS_IsValidExpression(arr, params->syntax);
+					
+					if(expr){
+						expr = VS_EvaluateExpr(arr, params->syntax);
+						sprintf(arr,"%d",expr);
+					}
+				}
+				
 				data_offset += 4;
 				data_size += 4;
 				
-				int num;
-				if(strstr(line,".word") != NULL){
-					num = (unsigned long)strtoul(strstr(line,".word") + 5, NULL, 0);
-				}
-				else{
-					(unsigned long)strtoul(strstr(line,".dw") + 3, NULL, 0);
-				}
+				int num = VS_ParseImmediateValue(arr, params);
 				
 				fwrite(&num,4,1,dat);
 			}
@@ -1483,7 +1847,13 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 			VS_UpdateDataSize(data_index, data_size);
 		}
 		
-		if(strstr(line,".half") != NULL){
+		if(strstr(line,".half") != NULL || strstr(line,".dh") != NULL){
+			int has_sym = VS_LineContainsSymbol(line);
+			
+			if(has_sym != -1){
+				VS_PasteSymbolNames(has_sym,line,dest,name);
+			}
+			
 			if(strstr(line,",")){
 				char* arr;
 				if(strstr(line,".half") != NULL){
@@ -1515,25 +1885,63 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					
 					data_offset += 2;
 					data_size += 2;
-				
-					int num = (unsigned short)strtoul(dest, NULL, 0);
+					
+					int neg = 0;
+					if(dest[0] == '-'){
+						neg = 1;
+					}
+					
+					if(VS_LineContainsOperator(dest+neg)){
+						int expr;
+						
+						VS_InitExprParser();
+
+						expr = VS_IsValidExpression(dest, params->syntax);
+						
+						if(expr){
+							expr = VS_EvaluateExpr(dest, params->syntax);
+							sprintf(dest,"%d",expr);
+						}
+					}
+					
+					int num = VS_ParseImmediateValue(dest, params);
+					
 					num &= 0xFFFF;
 					//printf("dest = %s\n",dest);
 					fwrite(&num,2,1,dat);
 				}
 			}
 			else{
+				char* arr;
+				if(strstr(line,".half") != NULL){
+					arr = strstr(line,".half") + 5;
+				}
+				else{
+					arr = strstr(line,".dh") + 3;
+				}
+				
+				int neg = 0;
+				if(arr[0] == '-'){
+					neg = 1;
+				}
+				
+				if(VS_LineContainsOperator(arr+neg)){
+					int expr;
+					
+					VS_InitExprParser();
+
+					expr = VS_IsValidExpression(arr, params->syntax);
+					
+					if(expr){
+						expr = VS_EvaluateExpr(arr, params->syntax);
+						sprintf(arr,"%d",expr);
+					}
+				}
+				
 				data_offset += 2;
 				data_size += 2;
 				
-				
-				int num;
-				if(strstr(line,".half") != NULL){
-					num = (unsigned short)strtoul(strstr(line,".half") + 5, NULL, 0);
-				}
-				else{
-					num = (unsigned short)strtoul(strstr(line,".dh") + 3, NULL, 0);
-				}
+				int num = VS_ParseImmediateValue(arr, params);
 				
 				num &= 0xFFFF;
 				fwrite(&num,2,1,dat);
@@ -1542,8 +1950,13 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 			VS_UpdateDataSize(data_index, data_size);
 		}
 		
-		if(strstr(line,".byte") != NULL){
-
+		if(strstr(line,".byte") != NULL || strstr(line,".db") != NULL){
+			int has_sym = VS_LineContainsSymbol(line);
+			
+			if(has_sym != -1){
+				VS_PasteSymbolNames(has_sym,line,dest,name);
+			}
+			
 			if(strstr(line,",")){
 				char* arr;
 				if(strstr(line,".byte") != NULL){
@@ -1573,29 +1986,66 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					memcpy(dest, arr + old_count, count - old_count);
 					dest[count-old_count] = '\0';
 					
+					int neg = 0;
+					if(dest[0] == '-'){
+						neg = 1;
+					}
+					
+					if(VS_LineContainsOperator(dest+neg)){
+						int expr;
+						
+						VS_InitExprParser();
+
+						expr = VS_IsValidExpression(dest, params->syntax);
+						
+						if(expr){
+							expr = VS_EvaluateExpr(dest, params->syntax);
+							sprintf(dest,"%d",expr);
+						}
+					}
+					
 					data_offset++;
 					data_size++;
 					
 					//printf("data_size = %d\n",data_size);
-				
-					int num = (unsigned char)strtoul(dest, NULL, 0);
+					int num = VS_ParseImmediateValue(dest, params);
+					
 					//printf("dest = %s\n",dest);
 					num &= 0xFF;
 					fwrite(&num,1,1,dat);
 				}
 			}
 			else{
+				char* arr;
+				if(strstr(line,".byte") != NULL){
+					arr = strstr(line,".byte") + 5;
+				}
+				else{
+					arr = strstr(line,".db") + 3;
+				}
+				
 				data_offset++;
 				data_size++;
 				
-				int num;
-				if(strstr(line,".byte") != NULL){
-					num = (unsigned char)strtoul(strstr(line,".byte") + 5, NULL, 0);
-				}
-				else{
-					num = (unsigned char)strtoul(strstr(line,".db") + 3, NULL, 0);
+				int neg = 0;
+				if(arr[0] == '-'){
+					neg = 1;
 				}
 				
+				if(VS_LineContainsOperator(arr+neg)){
+					int expr;
+					
+					VS_InitExprParser();
+
+					expr = VS_IsValidExpression(arr, params->syntax);
+					
+					if(expr){
+						expr = VS_EvaluateExpr(arr, params->syntax);
+						sprintf(arr,"%d",expr);
+					}
+				}
+				
+				int num = VS_ParseImmediateValue(arr, params);
 				num &= 0xFF;
 				fwrite(&num,1,1,dat);
 			}
@@ -1604,6 +2054,12 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 		}
 		
 		if(strstr(line,".float") != NULL){
+			int has_sym = VS_LineContainsSymbol(line);
+			
+			if(has_sym != -1){
+				VS_PasteSymbolNames(has_sym,line,dest,name);
+			}
+			
 			if(strstr(line,",")){
 				char* arr = strstr(line,".float") + 6;
 				
@@ -1693,6 +2149,24 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 							i++;
 							continue;
 						}
+						
+						if(string[i+1] == 'r'){
+							dest[len++] = '\r';
+							i++;
+							continue;
+						}
+						
+						if(string[i+1] == 't'){
+							dest[len++] = '\t';
+							i++;
+							continue;
+						}
+						
+						if(string[i+1] == 'v'){
+							dest[len++] = '\v';
+							i++;
+							continue;
+						}
 					}
 					
 					dest[len++] = string[i];
@@ -1737,10 +2211,6 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 	index = VS_GetIndexOfLastFuncSymbol();
 	num_of_instructions = instruction_count - prev_instruction_count;
 	VS_UpdateNumberOfInstructions(index,num_of_instructions);
-
-	if(params->oexe){
-		VS_ExpandAddrForAllDataSymbols((0x80010000) + (instruction_count << 2));
-	}
 	
 	fclose(pre);
 	

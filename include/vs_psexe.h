@@ -8,11 +8,13 @@
 *
 *   File: vs_psexe.h
 *   Date: 5/3/2025
-*   Version: 1.0
-*   Updated: 6/1/2025
+*   Version: 1.1
+*   Updated: 6/7/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
+
+#include <stdio.h>
 
 typedef struct VS_PSEXE{
 	char psexe_magic_id[8];
@@ -30,6 +32,7 @@ typedef struct VS_PSEXE{
 	unsigned char reserved[20];
 }VS_PSEXE;
 
+void VS_WritePSEXEHeader(FILE* file, VS_PSEXE psexe);
 void VS_WritePSEXE(char* filename, unsigned long org, int output);
 
 #endif

@@ -8,8 +8,11 @@ for the original Sony PlayStation and PlayStation Portable, but vsasm is capable
 ## Features
 * Outputs ELF(Executable and Linkable Format) binary object files compatible with the Mipsel GCC toolchain, allowing direct linkage with C/C++ code in modern PSX/PSP development.
 * Outputs SN Systems PsyQ binary object files to facilitate compatibility with the legacy PsyQ toolchain.
-* Can generate complete PS-EXE executables for bare metal PlayStation programs that can be run on real hardware and in emulators.
+* Can generate complete PS-EXE executables for bare metal PlayStation programs that can be ran on real hardware and in emulators.
+* Can generate complete CPE debug executables that the original PsyQ SDK toolchain could produce for use in official development kits or emulators today.
+* Can convert CPE debug executables to PS-EXE executables.
 * Supports distinct syntax modes for compatibility with the GNU toolchain or the old PsyQ SDK's ASMPSX assembler.
+* Includes a rudimentary C-like expression parser for immediate values including hexadecimal numbers in GNU and ASMPSX syntax.
 * Includes an assembler directive that specifies the architecture of the source file to enable platform-specific instruction selection and behavior. 
 * Implements nearly the entire custom instruction set architecture of the PSP's VFPU.
 * A core set of common and custom assembler directives to control certain attributes of the source file, functions, macros, and data objects.
@@ -44,7 +47,7 @@ $31, $ra            | ra           |
 $f0-$f31            | f0 - f31     |
 #### Data Types
 Hexadecimal integers begin with the prefix `0x` such as **0xFFFF** and can contain the digits `0-9` and the letters `A-F` in lower or uppercase format.
-
+In ASMPSX syntax, hexadecimal integers can either begin with the prefix `0x` or `$` such as `0xFFFF` or `$FFFF` since the `$` symbol isn't the prefix of a register.
 Floating-point values can either be normal integer values or can have ***ONE*** decimal point such as ***1.07*** or ***0.0075***.
 #### Assembler Directives
  Directive          | Description                                       | 
@@ -57,8 +60,9 @@ Floating-point values can either be normal integer values or can have ***ONE*** 
 .db "\<byte\>",...  | Equivalent to .byte directive above |
 .dh "\<half\>",...| Puts a single or array of 16-bit half word(s) in the data section |
 .dw "\<word\>",...| Puts a single or array of 32-bit word(s) in the data section |
-name equ value    | A macro-esque directive that replaces each instance of name with value |
+name equ value    | A macro-esque directive that replaces each instance of name with value  and value is immutable once set|
 name equr reg    | A macro-esque directive that replaces each instance of name with a register value |
+name set value | A macro-esque directive that replaces each instance of name with value and value is mutable once set |
 .empty, n         | Fills the data section with n zeros |
 .float "\<float\>",...| Puts a single or array of 32-bit floats in the data section |
 .globl, .global | Sets the scope of a symbol to be global |
@@ -72,6 +76,8 @@ name equr reg    | A macro-esque directive that replaces each instance of name w
 .text | Switches program to place symbols as function objects in the text section of the program |
 .type | Sets the symbol to either being a function or data object
 .word "\<word\>",...| Puts a single or array of 32-bit word(s) in the data section |
+.undefsym | Enables and adds undefined symbol references in jump, branch, and load calls into the symbol table with relocation entries for each instance |
+.inject "\<file>\" | Opens an external file and pastes its contents into the current instruction position in the text section |
 #### Pseudo-Instructions
 Instruction | Syntax           | Description           | Actual Number of Instructions |
 ------------|------------------|----------------------------------------|----| 
@@ -95,7 +101,7 @@ subi      | subi reg1, reg2, imm         | Subtracts an immediate value from reg
 subiu      | subiu reg1, reg2, imm         | Unsigned subtractraction on an immediate value from reg2 | 1 |
 b          | b label                    | Unconditinal branch to label | 1 |
 #### Short-handed Instructions
-Instruction                  |  Real instruction           |
+Instruction                  |  Real Instruction(s)           |
 -----------------------------|-----------------------------|
 addi reg, imm                | addi reg, reg, imm 
 add reg, imm                 | addi reg, reg, imm 
@@ -113,6 +119,32 @@ ori reg, imm                 | ori reg, reg, imm
 or reg1, reg2                | or reg1, reg1, reg2 
 xori reg, imm                | xori reg, reg, imm 
 xor reg1, reg2               | xor reg1, reg1, reg2 
+load/store reg, label     	 | lui at, (label >> 16) & 0xFFFF
+|							 | load/store reg, label & 0xffff(at)
+lb, label 					 | Same as above
+lbu, label					 | Same as above
+lc, label                    | Same as above
+lh, label 					 | Same as above
+lhu, label					 | Same as above
+lw, label                    | Same as above
+sb, label					 | Same as above
+sc, label                    | Same as above
+sh, label					 | Same as above
+sw, label                    | Same as above
+etc.						 | Same as above
+## Expression Parser
+VSASM comes packaged with a run-of-the-mill C-like expression parser for any instruction that operates with an immediate value which 
+allows for more complex programs that handle these intricate expressions at the assembler level instead of in real-time program execution.
+It supports the +, -, x, /, <<, >>, &, and | operators as of now.
+* Example Program 
+```c 
+Work:
+	li $a0, VS_IO
+	addi $a1, 0x80<<24
+	li $t0, 12 + ((4*5) << 2)
+	addi $t0, 4 / 2
+	addi $t0, 4 + 0x40
+```
 ## Usage
 * Basic usage
 ```c
@@ -136,8 +168,17 @@ vsasm -oexe example.s -o main.exe
 ```
 * Set output object file format
 ```c
-vsasm -fmt gnu example.s -o gnu.o
+vsasm -fmt elf example.s -o elf.o
 vsasm -fmt psyq example.s -o psyq.o
+```
+* Sets the format of the PlayStation Executable
+```c
+vsasm -oexe psexe example.s -o main.exe 
+vsasm -oexe cpe example.s -o main.cpe 
+```
+* Converts a PlayStation Debug Executable(CPE) to a normal PlayStation Executable(PS-EXE)
+```c 
+vsasm -cpe2exe main.cpe main.exe 
 ```
 ## Error Handling
 vsasm produces a rich set of error messages and warnings for various syntax and semantic errors that are printed 

@@ -11,8 +11,8 @@
 *
 *   File: vs_parser.h
 *   Date: 4/23/2025
-*   Version: 1.0
-*   Updated: 6/1/2025
+*   Version: 1.1
+*   Updated: 6/8/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
@@ -43,11 +43,12 @@ void VS_DestroyMacroTable();
 int VS_ReadLine(FILE* in, char* line);
 void VS_TrimLine(char* dest, char* src);
 void VS_TrimStrictLine(char* dest, const char* src);
+void VS_TrimCommentFromLine(char* dest);
 void VS_PrintTrimmedLine(FILE* out, const char* line);
 void VS_PrintStrictTrimmedLine(FILE* out, const char* line);
 int VS_IsStringBlank(const char* line);
 int VS_StrictIsStringBlank(const char* line);
-int VS_LineContainsInstruction(const char* line, VS_ASM_PARAMS* params);
+int VS_LineContainsInstruction(char* line, VS_ASM_PARAMS* params);
 int VS_LineContainsDirective(char* line);
 int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params);
 int VS_GetFirstOccurenceIndex(char* str, char c);
