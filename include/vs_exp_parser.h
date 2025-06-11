@@ -9,7 +9,7 @@
 *   File: vs_exp_parser.h
 *   Date: 6/9/2025
 *   Version: 1.1
-*   Updated: 6/9/2025
+*   Updated: 6/11/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
@@ -21,8 +21,8 @@
 void VS_InitExprParser();
 void VS_PushItemToExprStack(char item);
 char VS_PopItemFromExprStack();
-void VS_PushItemToExprStack_int(int item);
-int VS_PopItemFromExprStack_int();
+void VS_PushItemToExprStack_long(long item);
+long VS_PopItemFromExprStack_long();
 int VS_OperatorPrecedence(char symbol);
 int VS_IsValidOperator(char symbol);
 int VS_IsValidMathOperator(char symbol);
@@ -31,6 +31,6 @@ int VS_IsValidExpression(char* expr, VS_SYNTAX syntax);
 int VS_LineContainsOperator(char* line);
 void VS_ConvertExpr(char infix[], char postfix[]);
 int VS_IsBalancedParenthesis(char* expr);
-int VS_EvaluateExpr(char *input, VS_SYNTAX syntax);
+long VS_EvaluateExpr(char *input, VS_SYNTAX syntax);
 
 #endif

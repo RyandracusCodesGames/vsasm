@@ -17,7 +17,7 @@
 *   File: vs_parser.c
 *   Date: 4/29/2025
 *   Version: 1.1
-*   Updated: 6/10/2025
+*   Updated: 6/11/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
@@ -419,7 +419,8 @@ int VS_WriteLoadDelay(FILE* file, unsigned long* instruction, VS_ENDIAN endian){
 
 int VS_ReinterpretRTypeAsIType(FILE* file, const char* name, int rd, int rt, char* operands, unsigned long* instruction, VS_ASM_PARAMS* params){
 	VS_OPCODE opcode;
-	int neg, imm, is_valid_imm, expr;
+	long expr;
+	int neg, imm, is_valid_imm;
 	char line[VS_MAX_LINE];
 	
 	VS_InitExprParser();
@@ -442,7 +443,7 @@ int VS_ReinterpretRTypeAsIType(FILE* file, const char* name, int rd, int rt, cha
 		}
 		
 		expr = VS_EvaluateExpr(operands, params->syntax);
-		sprintf(operands,"%d",expr);
+		sprintf(operands,"%ld",expr);
 		is_valid_imm = VS_IsValidImmediate(operands, params);
 	}
 	else{
@@ -686,7 +687,8 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 	VS_I_TYPE itype;
 	VS_SYM sym;
 	unsigned long size1, size2, size3;
-	int is_valid_imm, is_valid_prefix, len, neg, expr;
+	long expr;
+	int is_valid_imm, is_valid_prefix, len, neg;
 	char* new_line, imm[256];
 	char trim[VS_MAX_LINE];
 	
@@ -761,7 +763,7 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 			}
 			
 			expr = VS_EvaluateExpr(trim, params->syntax);
-			sprintf(trim,"%d",expr);
+			sprintf(trim,"%ld",expr);
 			is_valid_imm = VS_IsValidImmediate(trim, params);
 			
 			if(is_valid_imm == -1){
@@ -782,11 +784,6 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 			}
 			
 			itype.imm = VS_ParseImmediateValue(trim, params);
-		}
-		
-		if(itype.imm > 65535 || itype.imm < 0){
-			*instruction = itype.op << 26 | itype.rt << 21 | itype.rs << 16 | (itype.imm & 0xFFFF);
-			return 5;
 		}
 		
 		*instruction = itype.op << 26 | itype.rt << 21 | itype.rs << 16 | (itype.imm & 0xFFFF);
@@ -839,7 +836,7 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 					}
 					
 					expr = VS_EvaluateExpr(operands, params->syntax);
-					sprintf(operands,"%d",expr);
+					sprintf(operands,"%ld",expr);
 					is_valid_imm = VS_IsValidImmediate(operands, params);
 				}
 				else{
@@ -917,7 +914,7 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 				}
 				
 				expr = VS_EvaluateExpr(operands, params->syntax);
-				sprintf(operands,"%d",expr);
+				sprintf(operands,"%ld",expr);
 				is_valid_imm = VS_IsValidImmediate(operands, params);
 			}
 			else{
@@ -976,7 +973,7 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 				}
 				
 				expr = VS_EvaluateExpr(operands, params->syntax);
-				sprintf(operands,"%d",expr);
+				sprintf(operands,"%ld",expr);
 				is_valid_imm = VS_IsValidImmediate(operands, params);
 			}
 			else{
@@ -1034,7 +1031,7 @@ int VS_ParseIType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 			}
 			
 			expr = VS_EvaluateExpr(new_line, params->syntax);
-			sprintf(new_line,"%d",expr);
+			sprintf(new_line,"%ld",expr);
 			is_valid_imm = VS_IsValidImmediate(new_line, params);
 		}
 		else{
@@ -1491,7 +1488,8 @@ int VS_ParseBType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* file, VS_ASM_PARAMS* params){
 	VS_ADDR_TYPE atype;
 	VS_SYM sym;
-	int len, is_valid_imm, is_valid_prefix, reg, expr;
+	long expr;
+	int len, is_valid_imm, is_valid_prefix, reg;
 	char new_line[VS_MAX_LINE+1];
 	unsigned long end, size1, symbol_ind;
 	unsigned long start;
@@ -1538,7 +1536,7 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 			}
 			
 			expr = VS_EvaluateExpr(new_line, params->syntax);
-			sprintf(new_line,"%d",expr);
+			sprintf(new_line,"%ld",expr);
 			is_valid_imm = VS_IsValidImmediate(new_line, params);
 		}
 		else{
@@ -1689,7 +1687,7 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 				}
 				
 				expr = VS_EvaluateExpr(new_line, params->syntax);
-				sprintf(new_line,"%d",expr);
+				sprintf(new_line,"%ld",expr);
 				is_valid_imm = VS_IsValidImmediate(new_line, params);
 			}
 			else{
@@ -1885,7 +1883,7 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 			}
 			
 			expr = VS_EvaluateExpr(new_line, params->syntax);
-			sprintf(new_line,"%d",expr);
+			sprintf(new_line,"%ld",expr);
 			is_valid_imm = VS_IsValidImmediate(new_line, params);
 		}
 		else{

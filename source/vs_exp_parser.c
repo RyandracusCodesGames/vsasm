@@ -21,7 +21,7 @@
 char stack[VS_STACK_SIZE]; 
 int top = -1; 
 
-int stack_int[VS_STACK_SIZE]; 
+long stack_int[VS_STACK_SIZE]; 
 int top_int = -1; 
 
 void VS_InitExprParser(){
@@ -36,10 +36,11 @@ char VS_PopItemFromExprStack(){
    return stack[top--]; 
 }
 
-void VS_PushItemToExprStack_int(int item){ 
+void VS_PushItemToExprStack_long(long item){ 
    stack_int[++top_int] = item; 
 } 
-int VS_PopItemFromExprStack_int(){ 
+
+long VS_PopItemFromExprStack_long(){ 
    return stack_int[top_int--]; 
 }
 
@@ -240,7 +241,7 @@ int VS_LineContainsOperator(char* line){
 	return 0;
 }
 
-int VS_EvaluateExpr(char *input, VS_SYNTAX syntax){
+long VS_EvaluateExpr(char *input, VS_SYNTAX syntax){
 	char output[VS_STACK_SIZE];
 	
 	if(VS_IsValidExpression(input,syntax)){
@@ -273,33 +274,34 @@ int VS_EvaluateExpr(char *input, VS_SYNTAX syntax){
 				char hexnum[20];
 				int k = 0;
 
-				while (isxdigit(output[i])) {
+				while (isxdigit(output[i]) && k < 20) {
 					hexnum[k++] = output[i++];
 				}
 				hexnum[k] = '\0';
 
-				int value = (int)strtol(hexnum, NULL, 16);
-				VS_PushItemToExprStack_int(value);
+				long value = (long)strtoul(hexnum, NULL, 16);
+
+				VS_PushItemToExprStack_long(value);
 			}
 			else if(isdigit(output[i])){
-				int num = 0;
+				long num = 0;
 				while(isdigit(output[i])){
 					num = num * 10 + (output[i++] - '0');
 				}
-				VS_PushItemToExprStack_int(num);
+				VS_PushItemToExprStack_long(num);
 			} else {
-				int op2 = VS_PopItemFromExprStack_int();
-				int op1 = VS_PopItemFromExprStack_int();
+				long op2 = VS_PopItemFromExprStack_long();
+				long op1 = VS_PopItemFromExprStack_long();
 				
 				switch(output[i]){
-					case '+': VS_PushItemToExprStack_int(op1 + op2); break;
-					case '-': VS_PushItemToExprStack_int(op1 - op2); break;
-					case '*': VS_PushItemToExprStack_int(op1 * op2); break;
-					case '/': VS_PushItemToExprStack_int(op1 / op2); break;
-					case '<': VS_PushItemToExprStack_int(op1 << op2); break;
-					case '>': VS_PushItemToExprStack_int(op1 >> op2); break;
-					case '&': VS_PushItemToExprStack_int(op1 & op2); break;
-					case '|': VS_PushItemToExprStack_int(op1 | op2); break;
+					case '+': VS_PushItemToExprStack_long(op1 + op2); break;
+					case '-': VS_PushItemToExprStack_long(op1 - op2); break;
+					case '*': VS_PushItemToExprStack_long(op1 * op2); break;
+					case '/': VS_PushItemToExprStack_long(op1 / op2); break;
+					case '<': VS_PushItemToExprStack_long(op1 << op2); break;
+					case '>': VS_PushItemToExprStack_long(op1 >> op2); break;
+					case '&': VS_PushItemToExprStack_long(op1 & op2); break;
+					case '|': VS_PushItemToExprStack_long(op1 | op2); break;
 				}
 				
 				i++;

@@ -15,7 +15,7 @@
 *   File: vs_parser.c
 *   Date: 4/23/2025
 *   Version: 1.1
-*   Updated: 6/10/2025
+*   Updated: 6/11/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
@@ -464,11 +464,13 @@ int VS_LineContainsInstruction(char* line, VS_ASM_PARAMS* params){
 
 void VS_PasteSymbolNames(int has_sym, char* line, char* dest, char* name){
 	VS_SYM sym;
-	int size;
+	int size, itr = 0;
 	
 	memcpy(dest, line, VS_MAX_LINE);
 
 	while(has_sym != -1){
+		itr++;
+		
 		sym = VS_GetSymbolFromIndex(has_sym);
 		
 		char* sym_name = sym.name;
@@ -497,6 +499,10 @@ void VS_PasteSymbolNames(int has_sym, char* line, char* dest, char* name){
 		VS_TrimStrictLine(dest,name);
 	
 		has_sym = VS_LineContainsSymbol(dest);
+		
+		if(itr >= 1000){
+			break;
+		}
 	}
 	
 	memcpy(line, dest, VS_MAX_LINE);
@@ -724,7 +730,11 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 				if(macro_index != -1){
 					memcpy(dest, line, VS_MAX_LINE);
 					
+					unsigned long itr = 0;
+					
 					while(macro_index != -1){
+						itr++;
+						
 						char* macro_name = macro_table.macro[macro_index].name;
 						
 					//	printf("macro_name = %s\n",macro_name);
@@ -753,6 +763,10 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 						
 						if(macro_index == -1){
 							fprintf(pre,"%s",dest);
+						}
+						
+						if(itr >= 1000){
+							break;
 						}
 					}
 					
@@ -1101,7 +1115,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 				}
 					
 				if(VS_LineContainsOperator(immediate)){
-					int expr;
+					long expr;
 					
 					VS_InitExprParser();
 
@@ -1109,7 +1123,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					
 					if(expr){
 						expr = VS_EvaluateExpr(immediate, params->syntax);
-						sprintf(immediate,"%d",expr);
+						sprintf(immediate,"%ld",expr);
 					}
 				}
 		
@@ -1788,7 +1802,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					}
 					
 					if(VS_LineContainsOperator(dest+neg)){
-						int expr;
+						long expr;
 						
 						VS_InitExprParser();
 
@@ -1796,7 +1810,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 						
 						if(expr){
 							expr = VS_EvaluateExpr(dest, params->syntax);
-							sprintf(dest,"%d",expr);
+							sprintf(dest,"%ld",expr);
 						}
 					}
 					
@@ -1824,7 +1838,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 				}
 				
 				if(VS_LineContainsOperator(arr+neg)){
-					int expr;
+					long expr;
 					
 					VS_InitExprParser();
 
@@ -1832,7 +1846,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					
 					if(expr){
 						expr = VS_EvaluateExpr(arr, params->syntax);
-						sprintf(arr,"%d",expr);
+						sprintf(arr,"%ld",expr);
 					}
 				}
 				
@@ -1892,7 +1906,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					}
 					
 					if(VS_LineContainsOperator(dest+neg)){
-						int expr;
+						long expr;
 						
 						VS_InitExprParser();
 
@@ -1900,7 +1914,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 						
 						if(expr){
 							expr = VS_EvaluateExpr(dest, params->syntax);
-							sprintf(dest,"%d",expr);
+							sprintf(dest,"%ld",expr);
 						}
 					}
 					
@@ -1926,7 +1940,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 				}
 				
 				if(VS_LineContainsOperator(arr+neg)){
-					int expr;
+					long expr;
 					
 					VS_InitExprParser();
 
@@ -1934,7 +1948,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					
 					if(expr){
 						expr = VS_EvaluateExpr(arr, params->syntax);
-						sprintf(arr,"%d",expr);
+						sprintf(arr,"%ld",expr);
 					}
 				}
 				
@@ -1992,7 +2006,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					}
 					
 					if(VS_LineContainsOperator(dest+neg)){
-						int expr;
+						long expr;
 						
 						VS_InitExprParser();
 
@@ -2000,7 +2014,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 						
 						if(expr){
 							expr = VS_EvaluateExpr(dest, params->syntax);
-							sprintf(dest,"%d",expr);
+							sprintf(dest,"%ld",expr);
 						}
 					}
 					
@@ -2033,7 +2047,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 				}
 				
 				if(VS_LineContainsOperator(arr+neg)){
-					int expr;
+					long expr;
 					
 					VS_InitExprParser();
 
@@ -2041,7 +2055,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					
 					if(expr){
 						expr = VS_EvaluateExpr(arr, params->syntax);
-						sprintf(arr,"%d",expr);
+						sprintf(arr,"%ld",expr);
 					}
 				}
 				
