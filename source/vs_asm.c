@@ -19,7 +19,7 @@
 *   File: vs_asm.c
 *   Date: 4/24/2025
 *   Version: 1.1
-*   Updated: 6/10/2025
+*   Updated: 6/19/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
@@ -188,7 +188,7 @@ int main(int argc, char** argv){
 			strcat(name,".o");
 		}
 		else{
-			memcpy(name,argv[i],strlen(argv[i]) & 0xff);
+			memcpy(name,argv[i],strlen(argv[i]) & 0xfd);
 			strcat(name,".o");
 		}
 		
@@ -232,20 +232,20 @@ int main(int argc, char** argv){
 				argv[i] = argv[i+2];
 				
 				if(params.exe_fmt == VS_EXE_PSX){
-					VS_WritePSEXE(argv[i],org,1);
+					VS_WritePSEXE(argv[i],params.org,1);
 				}
 				else{
-					VS_WriteCPE(argv[i],org,1);
+					VS_WriteCPE(argv[i],params.org,1);
 				}
 				
 				i += 2;
 			}
 			else{
 				if(params.exe_fmt == VS_EXE_PSX){
-					VS_WritePSEXE(argv[i],org,0);
+					VS_WritePSEXE(argv[i],params.org,0);
 				}
 				else{
-					VS_WriteCPE(argv[i],org,0);
+					VS_WriteCPE(argv[i],params.org,0);
 				}
 			}
 		}

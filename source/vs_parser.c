@@ -17,7 +17,7 @@
 *   File: vs_parser.c
 *   Date: 4/29/2025
 *   Version: 1.1
-*   Updated: 6/11/2025
+*   Updated: 6/27/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
@@ -474,6 +474,10 @@ int VS_ReinterpretRTypeAsIType(FILE* file, const char* name, int rd, int rt, cha
 		VS_GetOpcodeFromIndex(&opcode,VS_GetOpcode("addiu"));
 		*instruction = VS_Bin2Decimal(opcode.opcode) << 26 | rd << 21 | rt << 16 | (imm & 0xFFFF);
 	}
+	else if(!strcmp(name,"subu")){
+		VS_GetOpcodeFromIndex(&opcode,VS_GetOpcode("addiu"));
+		*instruction = VS_Bin2Decimal(opcode.opcode) << 26 | rd << 21 | rt << 16 | (imm & 0xFFFF);
+	}
 	else{
 		char itype_instruction[VS_MAX_LINE];
 		
@@ -655,7 +659,7 @@ int VS_ParseRType(VS_OPCODE op, unsigned long* instruction, char* line, FILE* fi
 				return -9;
 			}
 
-			return VS_ReinterpretRTypeAsIType(file,op.name,rtype.rd,rtype.rs,operands,instruction,params);
+			return VS_ReinterpretRTypeAsIType(file,op.name,rtype.rs,rtype.rd,operands,instruction,params);
 		}
 		else return -1;
 	}
@@ -1572,7 +1576,7 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 		}
 		else{
 			
-			if(start >= 65536){
+			if(start >= 65536 && (start & 0xFFFF)){
 				*instruction = 15 << 26 | reg << 16 | ((start >> 16) & 0xFFFF);
 				start = 13 << 26 | reg << 21 | reg << 16 | (start & 0xFFFF);
 				
@@ -1580,6 +1584,10 @@ int VS_ParseAddrType(VS_OPCODE op, unsigned long* instruction, char* line, FILE*
 				VS_WriteInstruction(file,start,params->endian);
 				
 				instruction_count++;
+			}
+			else if(start >= 65536){
+				*instruction = 15 << 26 | reg << 16 | ((start >> 16) & 0xFFFF);
+				return 1;
 			}
 			else if(start <= 32767){
 				*instruction = 9 << 26 | reg << 16 | (start & 0xFFFF);
@@ -1972,7 +1980,20 @@ int VS_ParseCopType(VS_OPCODE op, unsigned long* instruction, char* line, VS_ASM
 	if(!strcmp(op.name,"cop2")){
 		char* cofunc = line + strlen("cop2");
 		
-		is_valid_imm = VS_IsValidImmediate(cofunc, params);
+		if(VS_LineContainsOperator(cofunc)){		
+			long expr = VS_IsValidExpression(cofunc, params->syntax);
+			
+			if(!expr){
+				return -17;
+			}
+			
+			expr = VS_EvaluateExpr(cofunc, params->syntax);
+			sprintf(cofunc,"%ld",expr);
+			is_valid_imm = VS_IsValidImmediate(cofunc, params);
+		}
+		else{
+			is_valid_imm = VS_IsValidImmediate(cofunc, params);
+		}
 		
 		if(is_valid_imm == -1){
 			return -5;
@@ -1981,7 +2002,7 @@ int VS_ParseCopType(VS_OPCODE op, unsigned long* instruction, char* line, VS_ASM
 		   return -6;	
 		}
 		
-		offset = (unsigned long)strtoul(cofunc, NULL, 0);
+		offset = VS_ParseImmediateValue(cofunc, params);
 		
 		*instruction = VS_Bin2Decimal(op.opcode) << 26 | 1 << 25 | (offset & 0x1ffffff);
 		

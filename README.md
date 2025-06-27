@@ -1,5 +1,5 @@
 # vsasm - VideoStation Assembler
-An assembler for the MIPS I and II instruction set architectures capable of assembling source code containing mnemonic instructions into binary object code for the original Sony PlayStation, PlayStation Portable, and other MIPS platforms.
+A MIPS assembler that converts mnemonic instructions into binary object code for the original Sony PlayStation, PlayStation Portable, and other MIPS platforms.
 
 ## About
 vsasm is a custom MIPS assembler that fully implements the MIPS I and II ISA's with a primary focus on bare metal homebrew and reverse engineering development 

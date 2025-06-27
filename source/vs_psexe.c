@@ -11,7 +11,7 @@
 *   File: vs_psexe.c
 *   Date: 5/3/2025
 *   Version: 1.1
-*   Updated: 6/7/2025
+*   Updated: 6/18/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
@@ -61,7 +61,7 @@ void VS_WritePSEXE(char* filename, unsigned long org, int output){
 	psexe.psexe_magic_id[0] = 'P';psexe.psexe_magic_id[1] = 'S';psexe.psexe_magic_id[2] = '-';psexe.psexe_magic_id[3] = 'X';psexe.psexe_magic_id[4] = ' ';
 	psexe.psexe_magic_id[5] = 'E'; psexe.psexe_magic_id[6] = 'X'; psexe.psexe_magic_id[7] = 'E';
 	psexe.pc = org;
-	psexe.gp = 0xFFFFFFFF;
+	psexe.gp = 0;
 	psexe.ram_dest_addr = org;
 	psexe.file_size = 0;
 	psexe.unknown_1 = 0;

@@ -15,7 +15,7 @@
 *   File: vs_parser.c
 *   Date: 4/23/2025
 *   Version: 1.1
-*   Updated: 6/11/2025
+*   Updated: 6/26/2025
 *   Author: Ryandracus Chapman
 *
 ********************************************/
@@ -38,13 +38,13 @@ char* reserved_words[] = {
 	"f12","f13","f14","f15","f16","f17","f18","f19","f20","f21","f22","f23","f24","f25","f26","f27","f28","f29","f30",
 	"f31",".text",".data",".ktext",".globl",".global", ".word",".byte",".half",".dw",".dh",".db",".arch",".float",".syntax",
 	".undefsym",".type",".section",".bss",".include", ".align", ".incbin",".incasm",".ascii",".empty",".safeloaddelay",
-	".safeloadoff",".org","equ","equr","set",".inject",
+	".safeloadoff",".org","equ","equr","set",".inject",".defglobal",
 };
 
 char* directives[] = {
 	".text",".data",".ktext",".globl",".global", ".word",".byte",".half",".dw",".dh",".db",".arch",".float",".syntax",".undefsym",
 	".type",".section",".bss",".include", ".align", ".incbin",".incasm",".ascii",".empty",".safeloaddelay",".safeloadoff",".org",
-	".inject",
+	".inject",".defglobal",
 };
 
 int VS_StringIsReservedWord(char* name){
@@ -114,7 +114,7 @@ void VS_AddMacro(char* name, char* value){
 	}
 	else{
 		if(!nowarnings){
-			printf("Warning: Macro not added. Macro name or value is a reserved word.\n");
+			printf("Warning: Macro not added. Macro name already in table or macro name or value is a reserved word.\n");
 			printf("Attempted macro addition name and value pair (%s,%s)\n\n",name,value);
 		}
 	}
@@ -279,14 +279,10 @@ void VS_TrimStrictLine(char* dest, const char* src){
 	dest[size] = '\0';
 }
 
-void VS_TrimCommentFromLine(char* dest){
-	char cpy[VS_MAX_LINE+1], c;
-	
-	strcpy(cpy,dest);
-	
-	int i, size = 0, len = strlen(dest);
+void VS_TrimCommentFromLine(const char* src, char* dest){
+	int i, size = 0, len = strlen(src);
 	for(i = 0; i < len; i++){
-		c = cpy[i];
+		char c = src[i];
 		if(c == '#' || c == ';'){
 			break;
 		}
@@ -294,7 +290,13 @@ void VS_TrimCommentFromLine(char* dest){
 		dest[size++] = c;
 	}
 	
-	dest[size] = '\0';
+	if(!size){
+		dest[0] = '\n';
+		dest[1] = '\0';
+	}
+	else{
+		dest[size] = '\0';
+	}
 }
 
 int VS_GetFirstOccurenceIndex(char* str, char c){
@@ -514,7 +516,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 	int macro_index, index;
 	int first_occurence, line_count, instruction_count, prev_instruction_count, data_offset;
 	int data_index, old_data_index, data_size;
-	int has_data_section, safe_load_delay;
+	int has_data_section, safe_load_delay, defglobal;
 	char line[VS_MAX_LINE+1];
 	char dest[VS_MAX_LINE+1];
 	char name[VS_MAX_LINE+1];
@@ -532,44 +534,20 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 	line_start = 0;
 	line_end = 0;
 	prev_instruction_count = 0;
+	defglobal = 0;
 	dat = NULL;
 	nowarnings = params->nowarnings;
 	
 	/* BEGIN PREPROCESSING BY SEARCHING FOR AND REMOVING COMMENTS ( '#' OR ';' SYMBOLS) */
 	/* BEGIN SEARCHING FOR .INCLUDE DIRECTIVES AND REPLACING MACROS WITH THEIR SET VALUES */
 	while(VS_ReadLine(in, line)){
-		char* comment = strstr(line, "#");
-		
 		line_count++;
+		VS_TrimCommentFromLine(line,dest);
 		
-		/* IF '#' COMMENT TYPE NOT FOUND, TRY ';' COMMENT TYPE */
-		if(comment == NULL){
-			comment = strstr(line,";");
-			
-			if(comment != NULL){
-				first_occurence = VS_GetFirstOccurenceIndex(line,';');
-				memcpy(dest, line, first_occurence);
-				dest[first_occurence] = '\0';
+		if(!has_data_section){
+			if(strstr(line,".data") != NULL){
+				has_data_section = 1;
 			}
-			else{
-				/* THE CURRENT LINE CONTAINS NO COMMENTS */
-				memcpy(dest, line, VS_MAX_LINE);
-			}
-		}
-		else{
-			first_occurence = VS_GetFirstOccurenceIndex(line,'#');
-			memcpy(dest, line, first_occurence);
-			
-			if(!first_occurence){
-				dest[first_occurence] = '\n';	
-			}
-			else{
-				dest[first_occurence] = '\0';
-			}
-		}
-
-		if(strstr(line,".data") != NULL){
-			has_data_section = 1;
 		}
 		
 		if(!VS_IsStringBlank(dest) && dest != NULL && dest[0] != '\n'){
@@ -645,12 +623,8 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 			
 						line_end++;
 						
-						if(strstr(dest,"#") != NULL || strstr(dest,";") != NULL){
-							VS_TrimCommentFromLine(dest);
-						}
-						
+						VS_TrimCommentFromLine(trim,dest);
 						VS_PrintAndStoreTrimmedLine(preprocess,dest,trim);
-						
 					}
 					
 					VS_UpdateIncludeEntry(incindex,line_start,line_end);
@@ -663,8 +637,6 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 			fprintf(preprocess,"\n");
 		}
 	}
-	
-	VS_SortMacroTable();
 	
 	memset(dest,0x0,VS_MAX_LINE);
 	fseek(in, 0x0, SEEK_SET);
@@ -723,7 +695,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 				VS_SortMacroTable();
 				fprintf(pre,"\n");
 			}
-			else if(VS_LineContainsDirective(line) != -1 || strstr(line,":") != NULL){
+			else if((VS_LineContainsDirective(line) != -1 && strstr(line,".empty") == NULL) || strstr(line,":") != NULL){
 				fprintf(pre,"%s",line);
 			}
 			else{			
@@ -793,11 +765,16 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 		int instr_index = VS_LineContainsInstruction(line,params);
 		int dir = VS_LineContainsDirective(line);
 		
-		if(strstr(line,".globl") != NULL){
-			scope = VS_SCOPE_GLOBAL;
+		if(!defglobal){
+			if(strstr(line,".globl") != NULL){
+				scope = VS_SCOPE_GLOBAL;
+			}
+			
+			if(strstr(line,".global") != NULL){
+				scope = VS_SCOPE_GLOBAL;
+			}
 		}
-		
-		if(strstr(line,".global") != NULL){
+		else{
 			scope = VS_SCOPE_GLOBAL;
 		}
 		
@@ -815,6 +792,10 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 		
 		if(strstr(line,".safeloadoff") != NULL){
 			safe_load_delay = 0;
+		}
+		
+		if(strstr(line,".defglobal") != NULL){
+			defglobal = 1;
 		}
 		
 		if(strstr(line,".undefsym")){
@@ -848,7 +829,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					VS_PrintErrorFromIncludeEntry(err,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 			}
 		}
@@ -871,7 +852,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					VS_PrintErrorFromIncludeEntry(err,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 			}
 		}
@@ -948,7 +929,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					VS_PrintErrorFromIncludeEntry(err,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 				
 				fclose(pre);
@@ -975,7 +956,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					VS_PrintErrorFromIncludeEntry(err,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 				
 				fclose(pre);
@@ -1001,7 +982,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					VS_PrintErrorFromIncludeEntry(err,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 				
 				fclose(pre);
@@ -1032,7 +1013,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 						VS_PrintErrorFromIncludeEntry(err,line_count);
 					}
 					else{
-						VS_PrintError(in,line,line_count);
+						VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 					}
 					
 					fclose(pre);
@@ -1054,12 +1035,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 			char* num = org_str + strlen(".org");
 			int result;
 			
-			if(num[0] == '0' && num[1] == 'x'){
-				result = VS_HexDFA(num);
-			}
-			else{
-				result = VS_IntDFA(num);
-			}
+			result =  VS_IsValidImmediate(num,params);
 			
 			if(!result){
 				printf("Syntax Error: .org directive must have a valid immediate value\n");
@@ -1070,7 +1046,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					VS_PrintErrorFromIncludeEntry(err,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 				
 				fclose(pre);
@@ -1082,7 +1058,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 				return -1;
 			}
 			
-			params->org = (int)strtoul(num, NULL, 0);
+			params->org = VS_ParseImmediateValue(num,params);
 			params->org = (((params->org) + ((4)-1)) & ~((4)-1));
 		}
 		
@@ -1165,7 +1141,9 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 						
 
 						if(imm >= 65536){
-							instruction_count++;
+							if(imm & 0xFFFF){
+								instruction_count++;
+							}
 						}
 					}
 				}
@@ -1306,7 +1284,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					VS_PrintErrorFromIncludeEntry(err,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 				
 				fclose(pre);
@@ -1343,11 +1321,16 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 	while(VS_ReadLine(pre, line)){
 		line_count++;
 		
-		if(strstr(line,".globl") != NULL){
-			scope = VS_SCOPE_GLOBAL;
+		if(!defglobal){
+			if(strstr(line,".globl") != NULL){
+				scope = VS_SCOPE_GLOBAL;
+			}
+			
+			if(strstr(line,".global") != NULL){
+				scope = VS_SCOPE_GLOBAL;
+			}
 		}
-		
-		if(strstr(line,".global") != NULL){
+		else{
 			scope = VS_SCOPE_GLOBAL;
 		}
 		
@@ -1373,7 +1356,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					VS_PrintErrorFromIncludeEntry(err,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 				
 				fclose(pre);
@@ -1404,7 +1387,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 						VS_PrintErrorFromIncludeEntry(err,line_count);
 					}
 					else{
-						VS_PrintError(in,line,line_count);
+						VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 					}
 					
 					fclose(pre);
@@ -1546,7 +1529,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					VS_PrintErrorFromIncludeEntry(err,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 				
 				fclose(pre);
@@ -1561,12 +1544,32 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 				char* num = str + 1;
 				int result;
 				
-				if(num[0] == '0' && num[1] == 'x'){
-					result = VS_HexDFA(num);
+				int neg = 0;
+				if(num[0] == '-'){
+					neg = 1;
+				}
+				
+				if(VS_LineContainsOperator(num+neg)){
+					long expr;
+					
+					VS_InitExprParser();
+
+					result = VS_IsValidExpression(num, params->syntax);
+					
+					if(result){
+						expr = VS_EvaluateExpr(num, params->syntax);
+						sprintf(num,"%ld",expr);
+					}
 				}
 				else{
-					result = VS_IntDFA(num);
+					if(num[0] == '0' && num[1] == 'x'){
+						result = VS_HexDFA(num);
+					}
+					else{
+						result = VS_IntDFA(num);
+					}
 				}
+			
 				
 				if(!result){
 					printf("Syntax Error: .empty directive must have a valid immediate value\n");
@@ -1577,7 +1580,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 						VS_PrintErrorFromIncludeEntry(err,line_count);
 					}
 					else{
-						VS_PrintError(in,line,line_count);
+						VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 					}
 					
 					fclose(pre);
@@ -1611,7 +1614,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					VS_PrintErrorFromIncludeEntry(err,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 				
 				fclose(pre);
@@ -1638,7 +1641,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					VS_PrintErrorFromIncludeEntry(err,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 				
 				fclose(pre);
@@ -1664,7 +1667,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					VS_PrintErrorFromIncludeEntry(err,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 				
 				fclose(pre);
@@ -1695,7 +1698,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 						VS_PrintErrorFromIncludeEntry(err,line_count);
 					}
 					else{
-						VS_PrintError(in,line,line_count);
+						VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 					}
 					
 					fclose(pre);
@@ -1729,7 +1732,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					VS_PrintErrorFromIncludeEntry(err,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 				
 				fclose(pre);
@@ -2134,7 +2137,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					VS_PrintErrorFromIncludeEntry(err,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 				
 				fclose(pre);
@@ -2208,7 +2211,7 @@ int VS_PreproccessAssemblyFile(FILE* in, FILE* preprocess, VS_ASM_PARAMS* params
 					VS_PrintErrorFromIncludeEntry(err,line_count);
 				}
 				else{
-					VS_PrintError(in,line,line_count);
+					VS_PrintError(in,line,VS_GetActualLineCount(line_count));
 				}
 				
 				fclose(pre);

@@ -10,6 +10,7 @@
 
 .arch psx
 .syntax asmpsx
+.text
 
 ; PSX'S BASE I/O ADDRESS
 
@@ -1279,6 +1280,7 @@ DrawChar:
 	beq  a0, t3, vs_draw_space
 	nop
 	jal VS_CharData        ; data = VS_CharData(c);
+	nop
 	li t3, VS_CPU_TO_VRAM ; gpu0_cmd = VS_CPU_TO_VRAM; (delay slot)
 	sw t3, VS_GP0(t0)    ; *vs_gp0 = gpu0_cmd;
 	andi t1, t1, $FFFF  ; x &= $FFFF;
@@ -1305,6 +1307,7 @@ TransferLoop:
 	subi t3, t3, $1
 	blez a3, end
 	subi a3, a3, $1     ; strlen--; (delay slot)
+	nop
 	b DrawChar
 	nop
 	
